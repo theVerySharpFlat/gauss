@@ -1,0 +1,18 @@
+[package]
+name = "image_processing"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "iprocess"
+path = "lib/lib.rs"
+
+[[bin]]
+name = "processor"
+path = "src/main.rs"
+
+[dependencies]
+ash = "0.37.2"
+winit = "0.28.6"
