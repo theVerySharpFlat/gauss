@@ -7,4 +7,5 @@ pub enum InitError {
     QueueCreationFailure,
     LibraryNotFound,
     InstanceCreateFailed,
+    DebugMessengerCreationFailed,
 }

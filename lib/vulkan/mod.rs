@@ -1,14 +1,18 @@
-use self::init_error::InitError;
+use self::{
+    init_error::InitError,
+    instance::{create_instance, InstanceInfo},
+};
 
-mod init_error;
 mod device;
+mod init_error;
 mod instance;
 
-#[derive(Debug)]
 pub struct ComputeManager {
-
+    instance_info: InstanceInfo,
 }
 
 pub fn compute_init() -> Result<ComputeManager, InitError> {
-    Ok(ComputeManager {  })
+    let instance_info = create_instance(true)?;
+
+    Ok(ComputeManager { instance_info })
 }

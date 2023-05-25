@@ -14,5 +14,5 @@ name = "processor"
 path = "src/main.rs"
 
 [dependencies]
-ash = "0.37.2"
+ash = { version = "0.37.2", features=["linked", "debug"]}
 winit = "0.28.6"
