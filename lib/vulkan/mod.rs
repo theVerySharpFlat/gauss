@@ -1,6 +1,6 @@
 use self::{
     init_error::InitError,
-    instance::{create_instance, InstanceInfo},
+    instance::{create_instance, InstanceInfo}, device::initialize_device,
 };
 
 mod device;
@@ -13,6 +13,7 @@ pub struct ComputeManager {
 
 pub fn compute_init() -> Result<ComputeManager, InitError> {
     let instance_info = create_instance(true)?;
+    initialize_device(&instance_info);
 
     Ok(ComputeManager { instance_info })
 }

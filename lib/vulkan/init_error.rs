@@ -8,4 +8,5 @@ pub enum InitError {
     LibraryNotFound,
     InstanceCreateFailed,
     DebugMessengerCreationFailed,
+    PhysicalDeviceQueryFailed,
 }

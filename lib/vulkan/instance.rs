@@ -52,7 +52,7 @@ unsafe extern "system" fn vulkan_debug_callback(
 
 fn get_debug_utils_messenger_info() -> DebugUtilsMessengerCreateInfoEXT {
     let message_severity = DebugUtilsMessageSeverityFlagsEXT::default()
-        //| DebugUtilsMessageSeverityFlagsEXT::INFO
+        | DebugUtilsMessageSeverityFlagsEXT::INFO
         | DebugUtilsMessageSeverityFlagsEXT::WARNING
         | DebugUtilsMessageSeverityFlagsEXT::ERROR
         | DebugUtilsMessageSeverityFlagsEXT::VERBOSE;
