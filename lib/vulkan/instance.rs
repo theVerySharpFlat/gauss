@@ -20,6 +20,7 @@ use super::init_error::InitError;
 pub struct InstanceInfo {
     pub instance: Instance,
     pub debug_messenger: Option<DebugUtilsMessengerEXT>,
+    pub debug_utils_loader: Option<DebugUtils>
 }
 
 unsafe extern "system" fn vulkan_debug_callback(
@@ -140,6 +141,7 @@ pub fn create_instance(enable_validation: bool) -> Result<InstanceInfo, InitErro
         };
 
         let mut debug_messenger: Option<DebugUtilsMessengerEXT> = None;
+        let mut debug_utils_messenger_loader = None;
         if enable_validation {
             let debug_utils_loader = DebugUtils::new(&entry, &instance);
             debug_messenger = match debug_utils_loader
@@ -154,10 +156,13 @@ pub fn create_instance(enable_validation: bool) -> Result<InstanceInfo, InitErro
                     return Err(InitError::DebugMessengerCreationFailed);
                 }
             };
+
+            debug_utils_messenger_loader = Some(debug_utils_loader);
         }
 
         Ok(InstanceInfo {
             debug_messenger,
+            debug_utils_loader: debug_utils_messenger_loader,
             instance,
         })
     }
