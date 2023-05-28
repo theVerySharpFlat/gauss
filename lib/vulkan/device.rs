@@ -3,17 +3,17 @@ use std::{cmp::Ordering, ffi::CStr, ptr};
 use ash::{
     vk::{
         DeviceCreateFlags, DeviceCreateInfo, DeviceQueueCreateFlags, DeviceQueueCreateInfo, Handle,
-        PhysicalDevice, PhysicalDeviceFeatures, PhysicalDeviceType, QueueFamilyProperties,
-        QueueFlags, StructureType, Queue,
+        PhysicalDevice, PhysicalDeviceFeatures, PhysicalDeviceType, Queue, QueueFamilyProperties,
+        QueueFlags, StructureType,
     },
-    Instance, Device,
+    Device, Instance,
 };
 
 use super::{init_error::InitError, instance::InstanceInfo};
 
 pub struct DeviceInfo {
     pub device: Device,
-    pub compute_queue: Queue
+    pub compute_queue: Queue,
 }
 
 fn score_device(instance: &Instance, physical_device: PhysicalDevice) -> Option<u32> {
@@ -158,8 +158,12 @@ pub fn initialize_device(
             ..Default::default()
         };
 
-        let device_extensions =
-            [CStr::from_bytes_with_nul_unchecked(b"VK_KHR_portability_subset\0").as_ptr()];
+        let mut device_extensions: Vec<*const i8> = vec![];
+        #[cfg(any(target_os = "macos"))]
+        {
+            device_extensions
+                .push(CStr::from_bytes_with_nul_unchecked(b"VK_KHR_portability_subset\0").as_ptr());
+        }
 
         let layer_names =
             [CStr::from_bytes_with_nul_unchecked(b"VK_LAYER_KHRONOS_validation\0").as_ptr()];
@@ -176,7 +180,7 @@ pub fn initialize_device(
             } else {
                 ptr::null()
             },
-            enabled_extension_count: 1,
+            enabled_extension_count: device_extensions.len() as u32,
             pp_enabled_extension_names: device_extensions.as_ptr(),
             p_enabled_features: &physical_device_features,
         };
@@ -197,7 +201,7 @@ pub fn initialize_device(
 
         return Ok(DeviceInfo {
             device,
-            compute_queue
-        })
+            compute_queue,
+        });
     }
 }
