@@ -13,7 +13,7 @@ pub struct ComputeManager {
 
 pub fn compute_init() -> Result<ComputeManager, InitError> {
     let instance_info = create_instance(true)?;
-    initialize_device(&instance_info);
+    initialize_device(&instance_info, true);
 
     Ok(ComputeManager { instance_info })
 }

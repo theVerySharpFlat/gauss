@@ -9,7 +9,7 @@ use ash::{
     vk::{
         self, ApplicationInfo, DebugUtilsMessageSeverityFlagsEXT, DebugUtilsMessageTypeFlagsEXT,
         DebugUtilsMessengerCreateInfoEXT, DebugUtilsMessengerEXT, InstanceCreateFlags,
-        InstanceCreateInfo, KhrPortabilityEnumerationFn, StructureType,
+        InstanceCreateInfo, KhrPortabilityEnumerationFn, KhrGetPhysicalDeviceProperties2Fn, StructureType,
     },
     Entry, Instance,
 };
@@ -52,7 +52,7 @@ unsafe extern "system" fn vulkan_debug_callback(
 
 fn get_debug_utils_messenger_info() -> DebugUtilsMessengerCreateInfoEXT {
     let message_severity = DebugUtilsMessageSeverityFlagsEXT::default()
-        | DebugUtilsMessageSeverityFlagsEXT::INFO
+        //| DebugUtilsMessageSeverityFlagsEXT::INFO
         | DebugUtilsMessageSeverityFlagsEXT::WARNING
         | DebugUtilsMessageSeverityFlagsEXT::ERROR
         | DebugUtilsMessageSeverityFlagsEXT::VERBOSE;
@@ -87,6 +87,7 @@ pub fn create_instance(enable_validation: bool) -> Result<InstanceInfo, InitErro
         #[cfg(any(target_os = "macos"))]
         {
             extension_names.push(KhrPortabilityEnumerationFn::name());
+            extension_names.push(KhrGetPhysicalDeviceProperties2Fn::name());
         }
 
         if enable_validation {

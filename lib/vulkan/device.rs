@@ -1,14 +1,20 @@
-use std::{cmp::Ordering, ptr, ffi::CStr};
+use std::{cmp::Ordering, ffi::CStr, ptr};
 
 use ash::{
-    vk::{PhysicalDevice, PhysicalDeviceType, QueueFlags, QueueFamilyProperties, DeviceCreateInfo, StructureType, DeviceCreateFlags, DeviceQueueCreateInfo, DeviceQueueCreateFlags, PhysicalDeviceFeatures, Handle},
-    Instance,
+    vk::{
+        DeviceCreateFlags, DeviceCreateInfo, DeviceQueueCreateFlags, DeviceQueueCreateInfo, Handle,
+        PhysicalDevice, PhysicalDeviceFeatures, PhysicalDeviceType, QueueFamilyProperties,
+        QueueFlags, StructureType, Queue,
+    },
+    Instance, Device,
 };
 
 use super::{init_error::InitError, instance::InstanceInfo};
 
-#[derive(Debug)]
-pub struct DeviceInfo {}
+pub struct DeviceInfo {
+    pub device: Device,
+    pub compute_queue: Queue
+}
 
 fn score_device(instance: &Instance, physical_device: PhysicalDevice) -> Option<u32> {
     let mut score = 0;
@@ -68,31 +74,32 @@ fn load_queue_family_info(instance: &Instance, physical_device: PhysicalDevice) 
             }
         };
 
-        let queue_family_infos = 
+        let queue_family_infos =
             instance.get_physical_device_queue_family_properties(physical_device.clone());
 
         println!("queue family count: {}", queue_family_infos.len());
 
         let best_queue = queue_family_infos
             .iter()
-            .enumerate() 
+            .enumerate()
             .max_by(|(_, a), (_, b)| {
                 let b_score = score_queue(b);
                 score_queue(a).cmp(&b_score)
             });
 
         let compute_queue = match best_queue {
-            Some((queue, _)) => {
-                Some(queue as u32)
-            },
-            None => None
+            Some((queue, _)) => Some(queue as u32),
+            None => None,
         };
 
         QueueFamilyInfo { compute_queue }
     }
 }
 
-pub fn initialize_device(instance_info: &InstanceInfo) -> Result<DeviceInfo, InitError> {
+pub fn initialize_device(
+    instance_info: &InstanceInfo,
+    enable_validation: bool,
+) -> Result<DeviceInfo, InitError> {
     unsafe {
         let physical_devices = match instance_info.instance.enumerate_physical_devices() {
             Ok(devices) => devices,
@@ -104,7 +111,6 @@ pub fn initialize_device(instance_info: &InstanceInfo) -> Result<DeviceInfo, Ini
                 return Err(InitError::PhysicalDeviceQueryFailed);
             }
         };
-
 
         let optimal_device_opt = physical_devices.iter().max_by(|a, b| {
             let b_score = score_device(&instance_info.instance, **b);
@@ -128,7 +134,8 @@ pub fn initialize_device(instance_info: &InstanceInfo) -> Result<DeviceInfo, Ini
 
         let physical_device = optimal_device_opt.unwrap();
 
-        let queue_family_info = load_queue_family_info(&instance_info.instance, physical_device.clone());
+        let queue_family_info =
+            load_queue_family_info(&instance_info.instance, physical_device.clone());
         if !queue_family_info.complete() {
             return Err(InitError::NoComputeQueue);
         }
@@ -142,20 +149,20 @@ pub fn initialize_device(instance_info: &InstanceInfo) -> Result<DeviceInfo, Ini
             s_type: StructureType::DEVICE_QUEUE_CREATE_INFO,
             p_next: ptr::null(),
             flags: DeviceQueueCreateFlags::empty(),
-            queue_family_index: 0,//queue_family_info.compute_queue.unwrap(),
+            queue_family_index: queue_family_info.compute_queue.unwrap(),
             queue_count: 1,
             p_queue_priorities: queue_prior.as_ptr(),
         });
 
-        let physical_device_features = Vec::<PhysicalDeviceFeatures>::new();
+        let physical_device_features = PhysicalDeviceFeatures {
+            ..Default::default()
+        };
 
-        let device_extensions = [
-            CStr::from_bytes_with_nul_unchecked(b"VK_KHR_portability_subset\0").as_ptr()
-       ];
+        let device_extensions =
+            [CStr::from_bytes_with_nul_unchecked(b"VK_KHR_portability_subset\0").as_ptr()];
 
-        let layer_names = [
-            CStr::from_bytes_with_nul_unchecked(b"VK_LAYER_KHRONOS_validation\0").as_ptr()
-        ];
+        let layer_names =
+            [CStr::from_bytes_with_nul_unchecked(b"VK_LAYER_KHRONOS_validation\0").as_ptr()];
 
         let device_create_info = DeviceCreateInfo {
             s_type: StructureType::DEVICE_CREATE_INFO,
@@ -164,15 +171,33 @@ pub fn initialize_device(instance_info: &InstanceInfo) -> Result<DeviceInfo, Ini
             queue_create_info_count: queue_create_infos.len() as u32,
             p_queue_create_infos: queue_create_infos.as_ptr(),
             enabled_layer_count: 1,
-            pp_enabled_layer_names: layer_names.as_ptr(),
+            pp_enabled_layer_names: if enable_validation {
+                layer_names.as_ptr()
+            } else {
+                ptr::null()
+            },
             enabled_extension_count: 1,
             pp_enabled_extension_names: device_extensions.as_ptr(),
-            p_enabled_features: physical_device_features.as_ptr(),
+            p_enabled_features: &physical_device_features,
         };
 
-        let device = instance_info.instance.create_device(physical_device.clone(), &device_create_info, None);
-        println!("right here");
-    }
+        let device = match instance_info.instance.create_device(
+            physical_device.clone(),
+            &device_create_info,
+            None,
+        ) {
+            Ok(dev) => dev,
+            Err(e) => {
+                println!("Device creation failed with error \"{}\"", e);
+                return Err(InitError::LogicalDeviceCreationFailure);
+            }
+        };
 
-    Err(InitError::NoDevices)
+        let compute_queue = device.get_device_queue(queue_family_info.compute_queue.unwrap(), 0);
+
+        return Ok(DeviceInfo {
+            device,
+            compute_queue
+        })
+    }
 }
