@@ -9,4 +9,6 @@ pub enum InitError {
     InstanceCreateFailed,
     DebugMessengerCreationFailed,
     PhysicalDeviceQueryFailed,
+    ComputePoolCreationFailure,
+    AllocatorCreationFailure,
 }
