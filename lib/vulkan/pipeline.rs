@@ -28,14 +28,14 @@ pub enum PipelineCreateError {
     DescriptorSetAllocationFailure,
 }
 
-pub struct Pipeline<'a> {
+pub struct Pipeline {
     pub(super) pipeline: vk::Pipeline,
     pub(super) pipeline_layout: vk::PipelineLayout,
 
     pub(super) descriptor_set_layout: vk::DescriptorSetLayout,
     pub(super) descriptor_pool: vk::DescriptorPool,
 
-    device: &'a DeviceInfo
+    device: DeviceInfo
 }
 
 pub struct PipelineBuilder {
@@ -294,12 +294,12 @@ impl ComputeManager {
             pipeline_layout,
             descriptor_set_layout,
             descriptor_pool,
-            device: &self.device_info
+            device: self.device_info.clone()
         })
     }
 }
 
-impl<'a> Drop for Pipeline<'a> {
+impl<'a> Drop for Pipeline {
     fn drop(&mut self) {
         unsafe {
             self.device.device.destroy_pipeline_layout(self.pipeline_layout, None);

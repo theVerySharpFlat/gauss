@@ -4,10 +4,14 @@ use ash::vk::{
     AccessFlags, BufferCopy, BufferUsageFlags, CommandBuffer, DependencyFlags, DescriptorSet,
     DescriptorSetAllocateInfo, DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorType,
     Fence, MemoryBarrier, PipelineBindPoint, PipelineStageFlags, ShaderStageFlags, StructureType,
+    WriteDescriptorSet,
 };
 
 use super::{
-    allocation_strategy::Buffer, command_buffer_util, device::DeviceInfo, pipeline::Pipeline,
+    allocation_strategy::Buffer,
+    command_buffer_util,
+    device::{self, DeviceInfo},
+    pipeline::Pipeline,
     ComputeManager, Tensor,
 };
 
@@ -18,11 +22,10 @@ struct TensorBufferBacking {
     pub(super) readback_buffer: Option<Buffer>,
 }
 
-pub struct GPUTask<'a> {
+pub struct GPUTask /*<'a>*/ {
     command_buffer: CommandBuffer,
-    device_info: &'a DeviceInfo,
-    pipeline: &'a Pipeline<'a>,
-
+    device_info: DeviceInfo,
+    // pipeline: &'a Pipeline,
     buffers: HashMap<u32, TensorBufferBacking>,
     pub(super) descriptor_set: DescriptorSet,
 }
@@ -34,8 +37,10 @@ pub struct WorkGroupSize {
     pub z: u32,
 }
 
-pub struct GPUSyncPrimitive {
+pub struct GPUSyncPrimitive<'a> {
     pub(super) fence: Fence,
+
+    parent: &'a GPUTask,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -47,9 +52,9 @@ pub enum GPUTaskRecordingError {
 }
 
 impl ComputeManager {
-    pub fn new_task(
-        &self,
-        pipeline: &Pipeline,
+    pub fn new_task<'a>(
+        &'a mut self,
+        pipeline: &'a Pipeline,
         bindings: Vec<&Tensor>,
     ) -> Result<GPUTask, GPUTaskRecordingError> {
         let command_buffer = match command_buffer_util::allocate_command_buffer(
@@ -75,71 +80,6 @@ impl ComputeManager {
             }
         }
 
-        let buffer_backing = HashMap::<u32, TensorBufferBacking>::with_capacity(bindings.len());
-
-        for binding in bindings {
-            let gpu_buffer = match self.allocator.allocate_buffer(
-                &self.device_info,
-                bindings.len() as u64,
-                BufferUsageFlags::STORAGE_BUFFER
-                    | BufferUsageFlags::TRANSFER_SRC
-                    | BufferUsageFlags::TRANSFER_DST,
-                gpu_allocator::MemoryLocation::GpuOnly,
-                "gpu_only_alloc",
-                self.device_info.queue_indices.compute_queue.unwrap(),
-            ) {
-                Ok(b) => b,
-                Err(e) => {
-                    println!("Failed to allocate buffer! Error: {:?}", e);
-                    return Err(GPUTaskRecordingError::BufferAllocationFailure);
-                }
-            };
-
-            let staging_buffer = match self.allocator.allocate_buffer(
-                &self.device_info,
-                bindings.len() as u64,
-                BufferUsageFlags::TRANSFER_SRC,
-                gpu_allocator::MemoryLocation::CpuToGpu,
-                "gpu_staging_only_alloc",
-                self.device_info.queue_indices.compute_queue.unwrap(),
-            ) {
-                Ok(b) => b,
-                Err(e) => {
-                    println!("Failed to allocate buffer! Error: {:?}", e);
-                    return Err(GPUTaskRecordingError::BufferAllocationFailure);
-                }
-            };
-
-            let readback_buffer = if binding.readback_enabled {
-                Some(
-                    match self.allocator.allocate_buffer(
-                        &self.device_info,
-                        bindings.len() as u64,
-                        BufferUsageFlags::TRANSFER_SRC,
-                        gpu_allocator::MemoryLocation::CpuToGpu,
-                        "gpu_staging_only_alloc",
-                        self.device_info.queue_indices.compute_queue.unwrap(),
-                    ) {
-                        Ok(b) => b,
-                        Err(e) => {
-                            println!("Failed to allocate buffer! Error: {:?}", e);
-                            return Err(GPUTaskRecordingError::BufferAllocationFailure);
-                        }
-                    },
-                )
-            } else {
-                None
-            };
-
-            let backing = TensorBufferBacking {
-                gpu_buffer,
-                staging_buffer,
-                readback_buffer,
-            };
-
-            buffer_backing.insert(binding.id, backing);
-        }
-
         let descriptor_set_alloc_info = DescriptorSetAllocateInfo {
             s_type: StructureType::DESCRIPTOR_SET_ALLOCATE_INFO,
             p_next: ptr::null(),
@@ -162,6 +102,95 @@ impl ComputeManager {
             }
         };
 
+        let mut buffer_backing = HashMap::<u32, TensorBufferBacking>::with_capacity(bindings.len());
+
+        let mut descriptor_writes = Vec::<WriteDescriptorSet>::with_capacity(bindings.len());
+        for (i, binding) in bindings.iter().enumerate() {
+            let gpu_buffer = match self.allocator.allocate_buffer(
+                &self.device_info,
+                (binding.data().len() * 4) as u64,
+                BufferUsageFlags::STORAGE_BUFFER
+                    | BufferUsageFlags::TRANSFER_SRC
+                    | BufferUsageFlags::TRANSFER_DST,
+                gpu_allocator::MemoryLocation::GpuOnly,
+                "gpu_only_alloc",
+                self.device_info.queue_indices.compute_queue.unwrap(),
+            ) {
+                Ok(b) => b,
+                Err(e) => {
+                    println!("Failed to allocate buffer! Error: {:?}", e);
+                    return Err(GPUTaskRecordingError::BufferAllocationFailure);
+                }
+            };
+
+            let staging_buffer = match self.allocator.allocate_buffer(
+                &self.device_info,
+                (binding.data().len() * 4) as u64,
+                BufferUsageFlags::TRANSFER_SRC,
+                gpu_allocator::MemoryLocation::CpuToGpu,
+                "gpu_staging_only_alloc",
+                self.device_info.queue_indices.compute_queue.unwrap(),
+            ) {
+                Ok(b) => b,
+                Err(e) => {
+                    println!("Failed to allocate buffer! Error: {:?}", e);
+                    return Err(GPUTaskRecordingError::BufferAllocationFailure);
+                }
+            };
+
+            let readback_buffer = if binding.readback_enabled {
+                Some(
+                    match self.allocator.allocate_buffer(
+                        &self.device_info,
+                        (binding.data().len() * 4) as u64,
+                        BufferUsageFlags::TRANSFER_DST,
+                        gpu_allocator::MemoryLocation::CpuToGpu,
+                        "gpu_staging_only_alloc",
+                        self.device_info.queue_indices.compute_queue.unwrap(),
+                    ) {
+                        Ok(b) => b,
+                        Err(e) => {
+                            println!("Failed to allocate buffer! Error: {:?}", e);
+                            return Err(GPUTaskRecordingError::BufferAllocationFailure);
+                        }
+                    },
+                )
+            } else {
+                None
+            };
+
+            let backing = TensorBufferBacking {
+                gpu_buffer,
+                staging_buffer,
+                readback_buffer,
+            };
+
+            buffer_backing.insert(binding.id, backing);
+
+            descriptor_writes.push(WriteDescriptorSet {
+                s_type: StructureType::WRITE_DESCRIPTOR_SET,
+                p_next: ptr::null(),
+                dst_set: descriptor_set[0],
+                dst_binding: i as u32,
+                dst_array_element: 0,
+                descriptor_count: 1,
+                descriptor_type: DescriptorType::STORAGE_BUFFER,
+                p_image_info: ptr::null(),
+                p_buffer_info: &ash::vk::DescriptorBufferInfo {
+                    buffer: buffer_backing.get(&binding.id).unwrap().gpu_buffer.buffer,
+                    offset: 0,
+                    range: (binding.data().len() * 4) as u64,
+                },
+                p_texel_buffer_view: ptr::null(),
+            })
+        }
+
+        unsafe {
+            self.device_info
+                .device
+                .update_descriptor_sets(descriptor_writes.as_slice(), &[]);
+        }
+
         unsafe {
             self.device_info.device.cmd_bind_pipeline(
                 command_buffer.clone(),
@@ -181,14 +210,14 @@ impl ComputeManager {
 
         Ok(GPUTask {
             command_buffer,
-            device_info: &self.device_info,
+            device_info: self.device_info.clone(),
             buffers: buffer_backing,
-            pipeline,
-            descriptor_set: descriptor_set[0]
+            //pipeline,
+            descriptor_set: descriptor_set[0],
         })
     }
 
-    pub fn exec_task(&self, task: &GPUTask) -> Option<GPUSyncPrimitive> {
+    pub fn exec_task<'a>(&self, task: &'a GPUTask) -> Option<GPUSyncPrimitive<'a>> {
         let fence = match command_buffer_util::end_and_submit_command_buffer(
             &self.device_info.device,
             task.command_buffer,
@@ -201,7 +230,10 @@ impl ComputeManager {
             }
         };
 
-        return Some(GPUSyncPrimitive { fence });
+        return Some(GPUSyncPrimitive {
+            fence,
+            parent: task,
+        });
     }
 
     pub fn await_task(&self, sync: &GPUSyncPrimitive, sync_tensors: Vec<&mut Tensor>) {
@@ -215,14 +247,28 @@ impl ComputeManager {
         }
 
         sync_tensors.into_iter().for_each(|tensor| unsafe {
-            let mapped_ptr = tensor
+            let backing = match sync.parent.buffers.get(&tensor.id) {
+                Some(b) => b,
+                None => {
+                    println!(
+                        "Failed to find backing buffer for tensor! This is an internal issue!"
+                    );
+                    return;
+                }
+            };
+
+            let mapped_ptr = backing
                 .readback_buffer
                 .as_ref()
                 .unwrap()
                 .allocation
                 .mapped_ptr()
                 .unwrap()
-                .as_ptr();
+                .as_ptr() as *mut f32;
+
+            for i in 0..4 {
+                println!("{}", *(mapped_ptr.offset(i)));
+            }
 
             tensor
                 .data_mut()
@@ -232,10 +278,20 @@ impl ComputeManager {
     }
 }
 
-impl<'a> GPUTask<'a> {
+impl<'a> GPUTask {
     pub fn op_local_sync_device(self, tensors: Vec<&Tensor>) -> Self {
         tensors.iter().for_each(|tensor| unsafe {
-            tensor
+            let backing = match self.buffers.get(&tensor.id) {
+                Some(b) => b,
+                None => {
+                    println!(
+                        "Failed to find backing buffer for tensor! This is an internal issue!"
+                    );
+                    return;
+                }
+            };
+
+            backing
                 .staging_buffer
                 .allocation
                 .mapped_ptr()
@@ -248,8 +304,8 @@ impl<'a> GPUTask<'a> {
 
             self.device_info.device.cmd_copy_buffer(
                 self.command_buffer.clone(),
-                tensor.staging_buffer.buffer.clone(),
-                tensor.gpu_buffer.buffer.clone(),
+                backing.staging_buffer.buffer.clone(),
+                backing.gpu_buffer.buffer.clone(),
                 &[BufferCopy {
                     src_offset: 0,
                     dst_offset: 0,
@@ -295,7 +351,7 @@ impl<'a> GPUTask<'a> {
             self.device_info.device.cmd_pipeline_barrier(
                 self.command_buffer.clone(),
                 PipelineStageFlags::COMPUTE_SHADER,
-                PipelineStageFlags::HOST,
+                PipelineStageFlags::TRANSFER,
                 DependencyFlags::empty(),
                 &[MemoryBarrier {
                     s_type: StructureType::MEMORY_BARRIER,
@@ -308,16 +364,27 @@ impl<'a> GPUTask<'a> {
             )
         }
 
+
         tensors.iter().for_each(|tensor| unsafe {
-            if tensor.readback_buffer.is_none() {
+            let backing = match self.buffers.get(&tensor.id) {
+                Some(b) => b,
+                None => {
+                    println!(
+                        "Failed to find backing buffer for tensor! This is an internal issue!"
+                    );
+                    return;
+                }
+            };
+
+            if backing.readback_buffer.is_none() {
                 println!("Tensor has no readback buffer! Did you enable readback on creation?");
                 return;
             }
 
             self.device_info.device.cmd_copy_buffer(
                 self.command_buffer.clone(),
-                tensor.gpu_buffer.buffer.clone(),
-                tensor.readback_buffer.as_ref().unwrap().buffer.clone(),
+                backing.gpu_buffer.buffer.clone(),
+                backing.readback_buffer.as_ref().unwrap().buffer.clone(),
                 &[BufferCopy {
                     src_offset: 0,
                     dst_offset: 0,
@@ -330,7 +397,7 @@ impl<'a> GPUTask<'a> {
     }
 }
 
-impl<'a> Drop for GPUTask<'a> {
+impl<'a> Drop for GPUTask {
     fn drop(&mut self) {
         unsafe {
             self.device_info.device.free_command_buffers(

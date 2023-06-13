@@ -186,7 +186,7 @@ impl Allocator {
 
 impl Drop for Tensor {
     fn drop(&mut self) {
-        unsafe {
+        /*unsafe {
             (*self.parent)
                 .device_info
                 .device
@@ -220,6 +220,6 @@ impl Drop for Tensor {
                 .free(std::mem::take(&mut self.gpu_buffer.allocation));
 
             println!("hereeeee");
-        }
+        }*/
     }
 }

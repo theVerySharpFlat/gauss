@@ -12,6 +12,7 @@ use ash::{
 
 use super::{init_error::InitError, instance::InstanceInfo};
 
+#[derive(Clone)]
 pub struct DeviceInfo {
     pub device: Device,
     pub compute_queue: Queue,
@@ -55,6 +56,7 @@ fn score_device(instance: &Instance, physical_device: PhysicalDevice) -> Option<
     Some(score)
 }
 
+#[derive(Clone)]
 pub struct QueueFamilyInfo {
     pub compute_queue: Option<u32>,
 }
