@@ -1,2 +1,2 @@
 # gauss
-GPU Based Image Processing Library
+GPGPU Library with a vulkan backend written in Rust
