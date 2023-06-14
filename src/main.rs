@@ -1,5 +1,5 @@
 use indoc::indoc;
-use iprocess::vulkan::{compute_init, WorkGroupSize};
+use gauss::{compute_init, WorkGroupSize};
 use ndarray::prelude::*;
 
 pub fn main() {
