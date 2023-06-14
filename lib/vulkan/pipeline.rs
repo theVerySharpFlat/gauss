@@ -1,22 +1,17 @@
-use std::{
-    ffi::{CStr, CString},
-    ptr,
-    str::FromStr,
-};
+use std::{ffi::CString, ptr, str::FromStr};
 
 use ash::vk::{
-    self, ComputePipelineCreateInfo, DescriptorBufferInfo, DescriptorPoolCreateFlags,
-    DescriptorPoolCreateInfo, DescriptorPoolSize, DescriptorSetAllocateInfo,
-    DescriptorSetLayoutBinding, DescriptorSetLayoutCreateFlags, DescriptorSetLayoutCreateInfo,
-    DescriptorType, PipelineCache, PipelineCreateFlags, PipelineLayoutCreateFlags,
-    PipelineLayoutCreateInfo, PipelineShaderStageCreateFlags, PipelineShaderStageCreateInfo,
-    ShaderModule, ShaderModuleCreateFlags, ShaderModuleCreateInfo, ShaderStageFlags, StructureType,
-    WriteDescriptorSet,
+    self, ComputePipelineCreateInfo, DescriptorPoolCreateFlags, DescriptorPoolCreateInfo,
+    DescriptorPoolSize, DescriptorSetLayoutBinding, DescriptorSetLayoutCreateFlags,
+    DescriptorSetLayoutCreateInfo, DescriptorType, PipelineCache, PipelineCreateFlags,
+    PipelineLayoutCreateFlags, PipelineLayoutCreateInfo, PipelineShaderStageCreateFlags,
+    PipelineShaderStageCreateInfo, ShaderModule, ShaderModuleCreateFlags, ShaderModuleCreateInfo,
+    ShaderStageFlags, StructureType,
 };
 
 use shaderc;
 
-use super::{allocation_strategy::Tensor, ComputeManager, device::DeviceInfo};
+use super::{device::DeviceInfo, ComputeManager};
 
 #[derive(Clone, Copy, Debug)]
 pub enum PipelineCreateError {
@@ -35,12 +30,7 @@ pub struct Pipeline {
     pub(super) descriptor_set_layout: vk::DescriptorSetLayout,
     pub(super) descriptor_pool: vk::DescriptorPool,
 
-    device: DeviceInfo
-}
-
-pub struct PipelineBuilder {
-    shader_module: ShaderModule,
-    shader_name: String,
+    device: DeviceInfo,
 }
 
 pub struct Program {
@@ -219,7 +209,7 @@ impl ComputeManager {
         let descriptor_pool_create_info = DescriptorPoolCreateInfo {
             s_type: StructureType::DESCRIPTOR_POOL_CREATE_INFO,
             p_next: ptr::null(),
-            flags: DescriptorPoolCreateFlags::empty(),
+            flags: DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET,
             max_sets: 10,
             pool_size_count: 1,
             p_pool_sizes: &pool_size,
@@ -239,62 +229,12 @@ impl ComputeManager {
             }
         };
 
-        let descriptor_set_alloc_info = DescriptorSetAllocateInfo {
-            s_type: StructureType::DESCRIPTOR_SET_ALLOCATE_INFO,
-            p_next: ptr::null(),
-            descriptor_pool,
-            descriptor_set_count: 1,
-            p_set_layouts: &descriptor_set_layout,
-        };
-
-        /*let descriptor_set = unsafe {
-            match self
-                .device_info
-                .device
-                .allocate_descriptor_sets(&descriptor_set_alloc_info)
-            {
-                Ok(s) => s[0].clone(),
-                Err(e) => {
-                    println!("Failed to allocate descriptor set! Error: {}", e);
-                    return Err(PipelineCreateError::DescriptorSetAllocationFailure);
-                }
-            }
-        };*/
-
-        /*
-        tensors.iter().enumerate().for_each(|(i, tensor)| {
-            let buffer_info = DescriptorBufferInfo {
-                buffer: tensor.gpu_buffer.buffer.clone(),
-                offset: 0,
-                range: (tensor.data().len() * 4) as u64,
-            };
-
-            let descriptor_set_write_info = WriteDescriptorSet {
-                s_type: StructureType::WRITE_DESCRIPTOR_SET,
-                p_next: ptr::null(),
-                dst_set: descriptor_set.clone(),
-                dst_binding: i as u32,
-                dst_array_element: 0,
-                descriptor_count: 1,
-                descriptor_type: DescriptorType::STORAGE_BUFFER,
-                p_image_info: ptr::null(),
-                p_buffer_info: &buffer_info,
-                p_texel_buffer_view: ptr::null(),
-            };
-
-            unsafe {
-                self.device_info
-                    .device
-                    .update_descriptor_sets(&[descriptor_set_write_info], &[]);
-            }
-        });*/
-
         Ok(Pipeline {
             pipeline,
             pipeline_layout,
             descriptor_set_layout,
             descriptor_pool,
-            device: self.device_info.clone()
+            device: self.device_info.clone(),
         })
     }
 }
@@ -302,9 +242,15 @@ impl ComputeManager {
 impl<'a> Drop for Pipeline {
     fn drop(&mut self) {
         unsafe {
-            self.device.device.destroy_pipeline_layout(self.pipeline_layout, None);
-            self.device.device.destroy_descriptor_set_layout(self.descriptor_set_layout, None);
-            self.device.device.destroy_descriptor_pool(self.descriptor_pool, None);
+            self.device
+                .device
+                .destroy_pipeline_layout(self.pipeline_layout, None);
+            self.device
+                .device
+                .destroy_descriptor_set_layout(self.descriptor_set_layout, None);
+            self.device
+                .device
+                .destroy_descriptor_pool(self.descriptor_pool, None);
             self.device.device.destroy_pipeline(self.pipeline, None);
         }
     }

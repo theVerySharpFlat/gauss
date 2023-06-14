@@ -231,7 +231,7 @@ pub fn initialize_device(
             compute_queue,
             physical_device: *physical_device,
             queue_indices: load_queue_family_info(&instance_info.instance, physical_device.clone()),
-            compute_pool: create_compute_pool(&device, queue_family_info.compute_queue.unwrap())?
+            compute_pool: create_compute_pool(&device, queue_family_info.compute_queue.unwrap())?,
         });
     }
 }

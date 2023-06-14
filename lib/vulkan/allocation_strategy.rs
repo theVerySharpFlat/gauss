@@ -17,11 +17,6 @@ use super::{device::DeviceInfo, instance::InstanceInfo};
 
 pub struct Allocator {
     pub(super) vulkan_allocator: VulkanAllocator,
-    device: ash::Device,
-}
-
-pub struct AllocatorBufferCreateInfo {
-    size: u64,
 }
 
 pub struct Buffer {
@@ -36,19 +31,12 @@ pub struct Tensor {
     local_data: Array<f32, Ix1>,
 }
 
-pub struct NetBufferAllocation {
-    gpu_buffers: Vec<Buffer>,
-    staging_buffers: Vec<Buffer>,
-}
-
 #[derive(Debug, Clone, Copy)]
 pub enum AllocationError {
     AllocatorCreationFailure,
     BufferCreationFailure,
     MemoryAllocationError,
-    MemoryMapFailure,
     MemoryBindFailure,
-    TransferFailure,
 }
 
 impl ComputeManager {
@@ -100,15 +88,7 @@ impl Allocator {
             }
         };
 
-        Ok(Allocator {
-            vulkan_allocator,
-            device: device_info.device.clone(),
-        })
-    }
-
-    fn free_buffer(self: &mut Self, buffer: Buffer) {
-        let _ = self.vulkan_allocator.free(buffer.allocation);
-        unsafe { self.device.destroy_buffer(buffer.buffer, None) }
+        Ok(Allocator { vulkan_allocator })
     }
 
     pub fn allocate_buffer(

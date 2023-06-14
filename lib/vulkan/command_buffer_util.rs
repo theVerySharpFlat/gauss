@@ -79,7 +79,7 @@ pub fn end_and_submit_command_buffer(
             Err(e) => {
                 device.destroy_fence(fence.clone(), None);
                 Err(e)
-            },
+            }
         }
     }
 }

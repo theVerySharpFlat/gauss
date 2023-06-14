@@ -1,3 +1,4 @@
+use std::mem::MaybeUninit;
 
 use self::{
     device::{initialize_device, DeviceInfo},
@@ -6,15 +7,16 @@ use self::{
 };
 
 pub use allocation_strategy::Tensor;
+use gpu_allocator::vulkan::Allocator;
 pub use gpu_task::WorkGroupSize;
 
 mod allocation_strategy;
 mod command_buffer_util;
 mod device;
+mod gpu_task;
 mod init_error;
 mod instance;
 mod pipeline;
-mod gpu_task;
 
 pub struct ComputeManager {
     instance_info: InstanceInfo,
@@ -28,7 +30,16 @@ impl Drop for ComputeManager {
         unsafe {
             self.device_info.device.device_wait_idle().unwrap();
 
-            self.device_info.device.destroy_command_pool(self.device_info.compute_pool, None);
+            self.device_info
+                .device
+                .destroy_command_pool(self.device_info.compute_pool, None);
+
+            // Free the VkMemory allocations made by the allocator
+            #[allow(invalid_value)]
+            let mut dummy_allocator: Allocator = MaybeUninit::zeroed().assume_init();
+
+            std::mem::swap(&mut self.allocator.vulkan_allocator, &mut dummy_allocator);
+            drop(dummy_allocator);
 
             self.device_info.device.destroy_device(None);
             if self.instance_info.debug_utils_loader.is_some() {
@@ -54,13 +65,13 @@ pub fn compute_init() -> Result<ComputeManager, InitError> {
         Err(e) => {
             println!("Failed to create allocator! Error: {:?}", e);
             return Err(InitError::AllocatorCreationFailure);
-        },
+        }
     };
 
     Ok(ComputeManager {
         instance_info,
         device_info,
         allocator,
-        current_tensor_id: 0
+        current_tensor_id: 0,
     })
 }

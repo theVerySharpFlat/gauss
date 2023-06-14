@@ -1,18 +1,14 @@
 use std::{collections::HashMap, ffi::c_void, ptr};
 
 use ash::vk::{
-    AccessFlags, BufferCopy, BufferUsageFlags, CommandBuffer, DependencyFlags, DescriptorSet,
-    DescriptorSetAllocateInfo, DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorType,
-    Fence, MemoryBarrier, PipelineBindPoint, PipelineStageFlags, ShaderStageFlags, StructureType,
-    WriteDescriptorSet,
+    AccessFlags, BufferCopy, BufferUsageFlags, CommandBuffer, DependencyFlags,
+    DescriptorBufferInfo, DescriptorPool, DescriptorSet, DescriptorSetAllocateInfo, DescriptorType,
+    Fence, MemoryBarrier, PipelineBindPoint, PipelineStageFlags, StructureType, WriteDescriptorSet,
 };
 
 use super::{
-    allocation_strategy::Buffer,
-    command_buffer_util,
-    device::{self, DeviceInfo},
-    pipeline::Pipeline,
-    ComputeManager, Tensor,
+    allocation_strategy::Allocator, allocation_strategy::Buffer, command_buffer_util,
+    device::DeviceInfo, pipeline::Pipeline, ComputeManager, Tensor,
 };
 
 struct TensorBufferBacking {
@@ -22,12 +18,13 @@ struct TensorBufferBacking {
     pub(super) readback_buffer: Option<Buffer>,
 }
 
-pub struct GPUTask /*<'a>*/ {
+pub struct GPUTask {
     command_buffer: CommandBuffer,
     device_info: DeviceInfo,
-    // pipeline: &'a Pipeline,
     buffers: HashMap<u32, TensorBufferBacking>,
-    pub(super) descriptor_set: DescriptorSet,
+    descriptor_set: DescriptorSet,
+    parent_descriptor_pool: DescriptorPool,
+    allocator: *mut Allocator, // :grimace:
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -57,55 +54,10 @@ impl ComputeManager {
         pipeline: &'a Pipeline,
         bindings: Vec<&Tensor>,
     ) -> Result<GPUTask, GPUTaskRecordingError> {
-        let command_buffer = match command_buffer_util::allocate_command_buffer(
-            &self.device_info.device,
-            self.device_info.compute_pool,
-        ) {
-            Ok(b) => b,
-            Err(e) => {
-                println!("Failed to allocate command buffer! Error: {}", e);
-                return Err(GPUTaskRecordingError::CommandBufferAllocationFailure);
-            }
-        };
-
-        match command_buffer_util::begin_command_buffer_recording(
-            &self.device_info.device,
-            command_buffer.clone(),
-            false,
-        ) {
-            Ok(_) => (),
-            Err(e) => {
-                println!("Failed to begin command buffer recording! Error: {}", e);
-                return Err(GPUTaskRecordingError::CommandBufferRecordingStartFailure);
-            }
-        }
-
-        let descriptor_set_alloc_info = DescriptorSetAllocateInfo {
-            s_type: StructureType::DESCRIPTOR_SET_ALLOCATE_INFO,
-            p_next: ptr::null(),
-            descriptor_pool: pipeline.descriptor_pool,
-            descriptor_set_count: 1,
-            p_set_layouts: &pipeline.descriptor_set_layout,
-        };
-
-        let descriptor_set = unsafe {
-            match self
-                .device_info
-                .device
-                .allocate_descriptor_sets(&descriptor_set_alloc_info)
-            {
-                Ok(s) => s,
-                Err(e) => {
-                    println!("Failed to allocate descriptor set! Error: {}", e);
-                    return Err(GPUTaskRecordingError::DescriptorSetAllocationFailure);
-                }
-            }
-        };
-
         let mut buffer_backing = HashMap::<u32, TensorBufferBacking>::with_capacity(bindings.len());
 
-        let mut descriptor_writes = Vec::<WriteDescriptorSet>::with_capacity(bindings.len());
-        for (i, binding) in bindings.iter().enumerate() {
+        // Allocate buffers
+        for (_i, binding) in bindings.iter().enumerate() {
             let gpu_buffer = match self.allocator.allocate_buffer(
                 &self.device_info,
                 (binding.data().len() * 4) as u64,
@@ -166,29 +118,88 @@ impl ComputeManager {
             };
 
             buffer_backing.insert(binding.id, backing);
-
-            descriptor_writes.push(WriteDescriptorSet {
-                s_type: StructureType::WRITE_DESCRIPTOR_SET,
-                p_next: ptr::null(),
-                dst_set: descriptor_set[0],
-                dst_binding: i as u32,
-                dst_array_element: 0,
-                descriptor_count: 1,
-                descriptor_type: DescriptorType::STORAGE_BUFFER,
-                p_image_info: ptr::null(),
-                p_buffer_info: &ash::vk::DescriptorBufferInfo {
-                    buffer: buffer_backing.get(&binding.id).unwrap().gpu_buffer.buffer,
-                    offset: 0,
-                    range: (binding.data().len() * 4) as u64,
-                },
-                p_texel_buffer_view: ptr::null(),
-            })
         }
 
-        unsafe {
-            self.device_info
+        let descriptor_set_alloc_info = DescriptorSetAllocateInfo {
+            s_type: StructureType::DESCRIPTOR_SET_ALLOCATE_INFO,
+            p_next: ptr::null(),
+            descriptor_pool: pipeline.descriptor_pool,
+            descriptor_set_count: 1,
+            p_set_layouts: &pipeline.descriptor_set_layout,
+        };
+
+        let descriptor_set = unsafe {
+            match self
+                .device_info
                 .device
-                .update_descriptor_sets(descriptor_writes.as_slice(), &[]);
+                .allocate_descriptor_sets(&descriptor_set_alloc_info)
+            {
+                Ok(s) => s,
+                Err(e) => {
+                    println!("Failed to allocate descriptor set! Error: {}", e);
+                    return Err(GPUTaskRecordingError::DescriptorSetAllocationFailure);
+                }
+            }
+        };
+
+        {
+            let mut descriptor_writes = Vec::<WriteDescriptorSet>::with_capacity(bindings.len());
+            let mut descriptor_write_buffer_infos =
+                Vec::<DescriptorBufferInfo>::with_capacity(bindings.len());
+
+            bindings.iter().enumerate().for_each(|(i, binding)| {
+                descriptor_write_buffer_infos.push(DescriptorBufferInfo {
+                    buffer: buffer_backing
+                        .get(&binding.id)
+                        .unwrap()
+                        .gpu_buffer
+                        .buffer
+                        .clone(),
+                    offset: 0,
+                    range: (binding.data().len() * 4) as u64,
+                });
+                descriptor_writes.push(WriteDescriptorSet {
+                    s_type: StructureType::WRITE_DESCRIPTOR_SET,
+                    p_next: ptr::null(),
+                    dst_set: descriptor_set[0].clone(),
+                    dst_binding: i as u32,
+                    dst_array_element: 0,
+                    descriptor_count: 1,
+                    descriptor_type: DescriptorType::STORAGE_BUFFER,
+                    p_image_info: ptr::null(),
+                    p_buffer_info: &descriptor_write_buffer_infos[i],
+                    p_texel_buffer_view: ptr::null(),
+                });
+            });
+
+            unsafe {
+                self.device_info
+                    .device
+                    .update_descriptor_sets(descriptor_writes.as_slice(), &[]);
+            }
+        }
+
+        let command_buffer = match command_buffer_util::allocate_command_buffer(
+            &self.device_info.device,
+            self.device_info.compute_pool,
+        ) {
+            Ok(b) => b,
+            Err(e) => {
+                println!("Failed to allocate command buffer! Error: {}", e);
+                return Err(GPUTaskRecordingError::CommandBufferAllocationFailure);
+            }
+        };
+
+        match command_buffer_util::begin_command_buffer_recording(
+            &self.device_info.device,
+            command_buffer.clone(),
+            false,
+        ) {
+            Ok(_) => (),
+            Err(e) => {
+                println!("Failed to begin command buffer recording! Error: {}", e);
+                return Err(GPUTaskRecordingError::CommandBufferRecordingStartFailure);
+            }
         }
 
         unsafe {
@@ -212,8 +223,9 @@ impl ComputeManager {
             command_buffer,
             device_info: self.device_info.clone(),
             buffers: buffer_backing,
-            //pipeline,
             descriptor_set: descriptor_set[0],
+            parent_descriptor_pool: pipeline.descriptor_pool,
+            allocator: &mut self.allocator,
         })
     }
 
@@ -265,10 +277,6 @@ impl ComputeManager {
                 .mapped_ptr()
                 .unwrap()
                 .as_ptr() as *mut f32;
-
-            for i in 0..4 {
-                println!("{}", *(mapped_ptr.offset(i)));
-            }
 
             tensor
                 .data_mut()
@@ -364,7 +372,6 @@ impl<'a> GPUTask {
             )
         }
 
-
         tensors.iter().for_each(|tensor| unsafe {
             let backing = match self.buffers.get(&tensor.id) {
                 Some(b) => b,
@@ -404,6 +411,35 @@ impl<'a> Drop for GPUTask {
                 self.device_info.compute_pool.clone(),
                 &[self.command_buffer.clone()],
             );
+
+            // Free backing buffers
+            self.buffers.iter_mut().for_each(|(_, buffer)| {
+                let gpu_alloc = std::mem::take(&mut buffer.gpu_buffer.allocation);
+                let _ = (*self.allocator).vulkan_allocator.free(gpu_alloc);
+                self.device_info
+                    .device
+                    .destroy_buffer(buffer.gpu_buffer.buffer, None);
+
+                let stage_alloc = std::mem::take(&mut buffer.staging_buffer.allocation);
+                let _ = (*self.allocator).vulkan_allocator.free(stage_alloc);
+                self.device_info
+                    .device
+                    .destroy_buffer(buffer.staging_buffer.buffer, None);
+
+                if buffer.readback_buffer.is_some() {
+                    let readback_alloc =
+                        std::mem::take(&mut buffer.readback_buffer.as_mut().unwrap().allocation);
+                    let _ = (*self.allocator).vulkan_allocator.free(readback_alloc);
+                    self.device_info
+                        .device
+                        .destroy_buffer(buffer.readback_buffer.as_mut().unwrap().buffer, None);
+                }
+            });
+
+            let _ = self
+                .device_info
+                .device
+                .free_descriptor_sets(self.parent_descriptor_pool, &[self.descriptor_set]);
         }
     }
 }

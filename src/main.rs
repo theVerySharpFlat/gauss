@@ -19,10 +19,8 @@ pub fn main() {
         }
     "};
     {
-        let tensor_in = compute_manager
-            .create_tensor(array![1.0, 2.0, 3.0, 4.0, 5.0], false);
-        let mut tensor_out = compute_manager
-            .create_tensor(array![1.0, 1.0, 1.0, 1.0, 1.0], true);
+        let tensor_in = compute_manager.create_tensor(array![1.0, 2.0, 3.0, 4.0, 5.0], false);
+        let mut tensor_out = compute_manager.create_tensor(array![5.0, 4.0, 3.0, 2.0, 1.0], true);
 
         let pipeline = compute_manager
             .build_pipeline(
@@ -37,11 +35,10 @@ pub fn main() {
             .new_task(&pipeline, vec![&tensor_in, &tensor_out])
             .unwrap()
             .op_local_sync_device(vec![&tensor_in, &tensor_out])
-            .op_pipeline_dispatch(WorkGroupSize { x: 4, y: 1, z: 1 })
+            .op_pipeline_dispatch(WorkGroupSize { x: 5, y: 1, z: 1 })
             .op_device_sync_local(vec![&tensor_out]);
 
         let running_task = compute_manager.exec_task(&task).unwrap();
-
 
         compute_manager.await_task(&running_task, vec![&mut tensor_out]);
         println!("Data: {}", tensor_out.data());
