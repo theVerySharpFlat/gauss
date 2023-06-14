@@ -15,6 +15,8 @@ use ash::{
     Entry, Instance,
 };
 
+use crate::log_config::ValidationLayerLogConfig;
+
 use super::init_error::InitError;
 
 // #[derive(Debug)]
@@ -26,7 +28,7 @@ pub struct InstanceInfo {
 
 unsafe extern "system" fn vulkan_debug_callback(
     message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
-    message_type: vk::DebugUtilsMessageTypeFlagsEXT,
+    _message_type: vk::DebugUtilsMessageTypeFlagsEXT,
     p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT,
     _user_data: *mut std::os::raw::c_void,
 ) -> vk::Bool32 {
@@ -45,19 +47,48 @@ unsafe extern "system" fn vulkan_debug_callback(
         CStr::from_ptr(callback_data.p_message).to_string_lossy()
     };
 
-    println!(
-        "{message_severity:?}: {message_type:?} [{message_id_name} ({message_id_number})] : {message}",
-    );
+    let message = format!("[VK_VALIDATION: {message_id_name} ({message_id_number})] : {message}");
+    match message_severity {
+        DebugUtilsMessageSeverityFlagsEXT::VERBOSE => {
+            log::info!("{}", message);
+        }
+        DebugUtilsMessageSeverityFlagsEXT::INFO => {
+            log::info!("{}", message);
+        }
+        DebugUtilsMessageSeverityFlagsEXT::WARNING => {
+            log::warn!("{}", message);
+        }
+        DebugUtilsMessageSeverityFlagsEXT::ERROR => {
+            log::error!("{}", message);
+        }
+
+        _ => {}
+    };
 
     vk::FALSE
 }
 
-fn get_debug_utils_messenger_info() -> DebugUtilsMessengerCreateInfoEXT {
+fn get_debug_utils_messenger_info(
+    log_config: Option<ValidationLayerLogConfig>,
+) -> DebugUtilsMessengerCreateInfoEXT {
     let message_severity = DebugUtilsMessageSeverityFlagsEXT::default()
-        //| DebugUtilsMessageSeverityFlagsEXT::INFO
-        | DebugUtilsMessageSeverityFlagsEXT::WARNING
-        | DebugUtilsMessageSeverityFlagsEXT::ERROR
-        | DebugUtilsMessageSeverityFlagsEXT::VERBOSE;
+        | if let Some(cfg) = log_config {
+            let mut severity = DebugUtilsMessageSeverityFlagsEXT::default();
+            if cfg.log_errors {
+                severity |= DebugUtilsMessageSeverityFlagsEXT::ERROR;
+            }
+            if cfg.log_warnings {
+                severity |= DebugUtilsMessageSeverityFlagsEXT::WARNING;
+            }
+
+            if cfg.log_verbose_info {
+                severity |= DebugUtilsMessageSeverityFlagsEXT::INFO;
+                severity |= DebugUtilsMessageSeverityFlagsEXT::VERBOSE;
+            }
+            severity
+        } else {
+            DebugUtilsMessageSeverityFlagsEXT::default()
+        };
 
     let message_type = DebugUtilsMessageTypeFlagsEXT::default()
         | DebugUtilsMessageTypeFlagsEXT::GENERAL
@@ -71,7 +102,10 @@ fn get_debug_utils_messenger_info() -> DebugUtilsMessengerCreateInfoEXT {
         .build()
 }
 
-pub fn create_instance(enable_validation: bool) -> Result<InstanceInfo, InitError> {
+pub fn create_instance(
+    log_config: Option<ValidationLayerLogConfig>,
+) -> Result<InstanceInfo, InitError> {
+    let enable_validation = log_config.is_some();
     unsafe {
         let entry = Entry::linked();
 
@@ -114,7 +148,7 @@ pub fn create_instance(enable_validation: bool) -> Result<InstanceInfo, InitErro
             .map(|item| (*item).as_ptr())
             .collect();
 
-        let debug_messenger_info = get_debug_utils_messenger_info();
+        let debug_messenger_info = get_debug_utils_messenger_info(log_config);
 
         let instance_create_info = InstanceCreateInfo {
             s_type: StructureType::INSTANCE_CREATE_INFO,
@@ -134,7 +168,7 @@ pub fn create_instance(enable_validation: bool) -> Result<InstanceInfo, InitErro
         let instance = match entry.create_instance(&instance_create_info, None) {
             Ok(instance) => instance,
             Err(e) => {
-                println!("Instance creation failed with error \"{}\"", e);
+                log::error!("Instance creation failed with error \"{}\"", e);
                 return Err(InitError::InstanceCreateFailed);
             }
         };
@@ -148,7 +182,7 @@ pub fn create_instance(enable_validation: bool) -> Result<InstanceInfo, InitErro
             {
                 Ok(messenger) => Some(messenger),
                 Err(e) => {
-                    println!(
+                    log::error!(
                         "Failed to create debug messenger! Creation failed with error \"{}\"",
                         e
                     );
