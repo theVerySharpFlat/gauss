@@ -2,18 +2,24 @@ use std::{cmp::Ordering, ffi::CStr, ptr};
 
 use ash::{
     vk::{
-        DeviceCreateFlags, DeviceCreateInfo, DeviceQueueCreateFlags, DeviceQueueCreateInfo, Handle,
-        PhysicalDevice, PhysicalDeviceFeatures, PhysicalDeviceType, Queue, QueueFamilyProperties,
-        QueueFlags, StructureType,
+        CommandPool, CommandPoolCreateFlags, CommandPoolCreateInfo, DeviceCreateFlags,
+        DeviceCreateInfo, DeviceQueueCreateFlags, DeviceQueueCreateInfo, PhysicalDevice,
+        PhysicalDeviceFeatures, PhysicalDeviceType, Queue, QueueFamilyProperties, QueueFlags,
+        StructureType,
     },
     Device, Instance,
 };
 
 use super::{init_error::InitError, instance::InstanceInfo};
 
+#[derive(Clone)]
 pub struct DeviceInfo {
     pub device: Device,
     pub compute_queue: Queue,
+    pub physical_device: PhysicalDevice,
+    pub queue_indices: QueueFamilyInfo,
+
+    pub compute_pool: CommandPool,
 }
 
 fn score_device(instance: &Instance, physical_device: PhysicalDevice) -> Option<u32> {
@@ -50,8 +56,9 @@ fn score_device(instance: &Instance, physical_device: PhysicalDevice) -> Option<
     Some(score)
 }
 
-struct QueueFamilyInfo {
-    compute_queue: Option<u32>,
+#[derive(Clone)]
+pub struct QueueFamilyInfo {
+    pub compute_queue: Option<u32>,
 }
 
 impl QueueFamilyInfo {
@@ -93,6 +100,25 @@ fn load_queue_family_info(instance: &Instance, physical_device: PhysicalDevice) 
         };
 
         QueueFamilyInfo { compute_queue }
+    }
+}
+
+fn create_compute_pool(device: &Device, queue_index: u32) -> Result<CommandPool, InitError> {
+    let create_info = CommandPoolCreateInfo {
+        s_type: StructureType::COMMAND_POOL_CREATE_INFO,
+        p_next: ptr::null(),
+        flags: CommandPoolCreateFlags::RESET_COMMAND_BUFFER,
+        queue_family_index: queue_index,
+    };
+
+    unsafe {
+        Ok(match device.create_command_pool(&create_info, None) {
+            Ok(p) => p,
+            Err(e) => {
+                println!("Failed to create command pool! Error: {}", e);
+                return Err(InitError::ComputePoolCreationFailure);
+            }
+        })
     }
 }
 
@@ -158,6 +184,7 @@ pub fn initialize_device(
             ..Default::default()
         };
 
+        #[allow(unused_mut)]
         let mut device_extensions: Vec<*const i8> = vec![];
         #[cfg(any(target_os = "macos"))]
         {
@@ -200,8 +227,11 @@ pub fn initialize_device(
         let compute_queue = device.get_device_queue(queue_family_info.compute_queue.unwrap(), 0);
 
         return Ok(DeviceInfo {
-            device,
+            device: device.clone(),
             compute_queue,
+            physical_device: *physical_device,
+            queue_indices: load_queue_family_info(&instance_info.instance, physical_device.clone()),
+            compute_pool: create_compute_pool(&device, queue_family_info.compute_queue.unwrap())?,
         });
     }
 }

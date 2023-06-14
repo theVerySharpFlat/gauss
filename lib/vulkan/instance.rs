@@ -1,6 +1,6 @@
 use std::{
     borrow::Cow,
-    ffi::{c_void, CStr, CString, c_char},
+    ffi::{c_char, c_void, CStr, CString},
     ptr,
 };
 
@@ -9,7 +9,8 @@ use ash::{
     vk::{
         self, ApplicationInfo, DebugUtilsMessageSeverityFlagsEXT, DebugUtilsMessageTypeFlagsEXT,
         DebugUtilsMessengerCreateInfoEXT, DebugUtilsMessengerEXT, InstanceCreateFlags,
-        InstanceCreateInfo, KhrPortabilityEnumerationFn, KhrGetPhysicalDeviceProperties2Fn, StructureType,
+        InstanceCreateInfo, KhrGetPhysicalDeviceProperties2Fn, KhrPortabilityEnumerationFn,
+        StructureType,
     },
     Entry, Instance,
 };
@@ -20,7 +21,7 @@ use super::init_error::InitError;
 pub struct InstanceInfo {
     pub instance: Instance,
     pub debug_messenger: Option<DebugUtilsMessengerEXT>,
-    pub debug_utils_loader: Option<DebugUtils>
+    pub debug_utils_loader: Option<DebugUtils>,
 }
 
 unsafe extern "system" fn vulkan_debug_callback(
@@ -95,9 +96,9 @@ pub fn create_instance(enable_validation: bool) -> Result<InstanceInfo, InitErro
             extension_names.push(DebugUtils::name());
         }
 
-        let layer_names = [
-            CStr::from_bytes_with_nul_unchecked(b"VK_LAYER_KHRONOS_validation\0")
-        ];
+        let layer_names = [CStr::from_bytes_with_nul_unchecked(
+            b"VK_LAYER_KHRONOS_validation\0",
+        )];
 
         let mut instance_flags = InstanceCreateFlags::default();
         #[cfg(any(target_os = "macos"))]
@@ -105,10 +106,8 @@ pub fn create_instance(enable_validation: bool) -> Result<InstanceInfo, InitErro
             instance_flags |= InstanceCreateFlags::ENUMERATE_PORTABILITY_KHR;
         }
 
-        let layer_names_raw: Vec<*const c_char> = layer_names
-            .iter()
-            .map(|item| item.as_ptr())
-            .collect();
+        let layer_names_raw: Vec<*const c_char> =
+            layer_names.iter().map(|item| item.as_ptr()).collect();
 
         let extension_names_raw: Vec<*const i8> = extension_names
             .iter()
