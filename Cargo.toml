@@ -15,6 +15,7 @@ path = "src/main.rs"
 
 [dependencies]
 ash = { version = "0.37.2", features=["linked", "debug"]}
+env_logger = "0.10.0"
 gpu-allocator = "0.22.0"
 indoc = "2.0.1"
 log = "0.4.19"

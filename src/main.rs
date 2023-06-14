@@ -1,9 +1,24 @@
+use gauss::{compute_init, AllocatorLogConfig, LogConfig, ValidationLayerLogConfig, WorkGroupSize};
 use indoc::indoc;
-use gauss::{compute_init, WorkGroupSize};
 use ndarray::prelude::*;
 
 pub fn main() {
-    let mut compute_manager = compute_init().unwrap();
+    let mut compute_manager = compute_init(LogConfig {
+        validation_config: Some(ValidationLayerLogConfig {
+            log_errors: true,
+            log_warnings: true,
+            log_verbose_info: false,
+        }),
+        allocator_config: Some(AllocatorLogConfig {
+            log_memory_information: false,
+            log_leaks_on_shutdown: true,
+            store_stack_traces: false,
+            log_allocations: false,
+            log_frees: false,
+            log_stack_traces: false,
+        }),
+    })
+    .unwrap();
 
     let shader = indoc! {"
         #version 450

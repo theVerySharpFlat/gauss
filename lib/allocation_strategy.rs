@@ -12,6 +12,8 @@ use gpu_allocator::{
 
 use ndarray::prelude::*;
 
+use crate::AllocatorLogConfig;
+
 use super::ComputeManager;
 use super::{device::DeviceInfo, instance::InstanceInfo};
 
@@ -66,24 +68,29 @@ impl Allocator {
     pub fn new(
         instance_info: &InstanceInfo,
         device_info: &DeviceInfo,
+        log_config: Option<AllocatorLogConfig>,
     ) -> Result<Self, AllocationError> {
         let vulkan_allocator = match VulkanAllocator::new(&AllocatorCreateDesc {
             instance: instance_info.instance.clone(),
             device: device_info.device.clone(),
             physical_device: device_info.physical_device,
-            debug_settings: AllocatorDebugSettings {
-                log_memory_information: true,
-                log_leaks_on_shutdown: true,
-                store_stack_traces: false,
-                log_allocations: true,
-                log_frees: false,
-                log_stack_traces: false,
+            debug_settings: if let Some(cfg) = log_config {
+                AllocatorDebugSettings {
+                    log_memory_information: cfg.log_memory_information,
+                    log_leaks_on_shutdown: cfg.log_leaks_on_shutdown,
+                    store_stack_traces: cfg.store_stack_traces,
+                    log_allocations: cfg.log_allocations,
+                    log_frees: cfg.log_frees,
+                    log_stack_traces: cfg.log_stack_traces,
+                }
+            } else {
+                AllocatorDebugSettings::default()
             },
             buffer_device_address: false,
         }) {
             Ok(a) => a,
             Err(e) => {
-                println!("Failed to create allocator! Error: \"{}\"", e);
+                log::error!("Failed to create allocator! Error: \"{}\"", e);
                 return Err(AllocationError::AllocatorCreationFailure);
             }
         };
@@ -117,7 +124,7 @@ impl Allocator {
             match device_info.device.create_buffer(&buffer_create_info, None) {
                 Ok(b) => b,
                 Err(e) => {
-                    println!("Failed to allocate buffer with error {}", e);
+                    log::error!("Failed to allocate buffer with error {}", e);
                     return Err(AllocationError::BufferCreationFailure);
                 }
             }
@@ -138,7 +145,7 @@ impl Allocator {
         }) {
             Ok(a) => a,
             Err(e) => {
-                println!("Failed to allocate backing memory for buffer! Error: {}", e);
+                log::error!("Failed to allocate backing memory for buffer! Error: {}", e);
                 return Err(AllocationError::MemoryAllocationError);
             }
         };
@@ -151,7 +158,7 @@ impl Allocator {
             ) {
                 Ok(_) => (),
                 Err(e) => {
-                    println!("Failed to bind buffer memory! Error: {}", e);
+                    log::error!("Failed to bind buffer memory! Error: {}", e);
                     return Err(AllocationError::MemoryBindFailure);
                 }
             };
@@ -161,45 +168,5 @@ impl Allocator {
             buffer,
             allocation: buffer_allocation,
         })
-    }
-}
-
-impl Drop for Tensor {
-    fn drop(&mut self) {
-        /*unsafe {
-            (*self.parent)
-                .device_info
-                .device
-                .destroy_buffer(self.gpu_buffer.buffer, None);
-            (*self.parent)
-                .device_info
-                .device
-                .destroy_buffer(self.staging_buffer.buffer, None);
-
-            if self.readback_buffer.is_some() {
-                (*self.parent)
-                    .device_info
-                    .device
-                    .destroy_buffer(self.readback_buffer.as_ref().unwrap().buffer, None);
-
-                let _ = (*self.parent)
-                    .allocator
-                    .vulkan_allocator
-                    .free(std::mem::take(
-                        &mut self.readback_buffer.as_mut().unwrap().allocation,
-                    ));
-            }
-
-            let _ = (*self.parent)
-                .allocator
-                .vulkan_allocator
-                .free(std::mem::take(&mut self.staging_buffer.allocation));
-            let _ = (*self.parent)
-                .allocator
-                .vulkan_allocator
-                .free(std::mem::take(&mut self.gpu_buffer.allocation));
-
-            println!("hereeeee");
-        }*/
     }
 }

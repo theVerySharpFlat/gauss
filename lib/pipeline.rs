@@ -130,7 +130,7 @@ impl ComputeManager {
             {
                 Ok(l) => l,
                 Err(e) => {
-                    println!("Failed to create descriptor set layout! Error: {}", e);
+                    log::error!("Failed to create descriptor set layout! Error: {}", e);
                     return Err(PipelineCreateError::DescriptorSetLayoutCreationFailure);
                 }
             }
@@ -154,7 +154,7 @@ impl ComputeManager {
             {
                 Ok(l) => l,
                 Err(e) => {
-                    println!("Failed to create pipeline layout! Error: {}", e);
+                    log::error!("Failed to create pipeline layout! Error: {}", e);
                     return Err(PipelineCreateError::PipelineLayoutCreationFailure);
                 }
             }
@@ -189,7 +189,7 @@ impl ComputeManager {
             ) {
                 Ok(p) => p[0],
                 Err((_, e)) => {
-                    println!("Failed to create pipeline! Error {}", e);
+                    log::error!("Failed to create pipeline! Error {}", e);
                     return Err(PipelineCreateError::PipelineCreationFailure);
                 }
             }
@@ -223,7 +223,7 @@ impl ComputeManager {
             {
                 Ok(p) => p,
                 Err(e) => {
-                    println!("Failed to create descriptor pool! Error: {e}");
+                    log::error!("Failed to create descriptor pool! Error: {}", e);
                     return Err(PipelineCreateError::DescriptorPoolCreationFailure);
                 }
             }

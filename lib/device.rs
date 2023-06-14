@@ -1,8 +1,12 @@
-use std::{cmp::Ordering, ffi::CStr, ptr};
+use std::{
+    cmp::Ordering,
+    ffi::{CStr, CString},
+    ptr,
+};
 
 use ash::{
     vk::{
-        CommandPool, CommandPoolCreateFlags, CommandPoolCreateInfo, DeviceCreateFlags,
+        self, CommandPool, CommandPoolCreateFlags, CommandPoolCreateInfo, DeviceCreateFlags,
         DeviceCreateInfo, DeviceQueueCreateFlags, DeviceQueueCreateInfo, PhysicalDevice,
         PhysicalDeviceFeatures, PhysicalDeviceType, Queue, QueueFamilyProperties, QueueFlags,
         StructureType,
@@ -84,8 +88,6 @@ fn load_queue_family_info(instance: &Instance, physical_device: PhysicalDevice) 
         let queue_family_infos =
             instance.get_physical_device_queue_family_properties(physical_device.clone());
 
-        println!("queue family count: {}", queue_family_infos.len());
-
         let best_queue = queue_family_infos
             .iter()
             .enumerate()
@@ -115,10 +117,36 @@ fn create_compute_pool(device: &Device, queue_index: u32) -> Result<CommandPool,
         Ok(match device.create_command_pool(&create_info, None) {
             Ok(p) => p,
             Err(e) => {
-                println!("Failed to create command pool! Error: {}", e);
+                log::error!("Failed to create command pool! Error: {}", e);
                 return Err(InitError::ComputePoolCreationFailure);
             }
         })
+    }
+}
+
+pub fn log_device_info(instance: &Instance, device: &Device, physical_device: PhysicalDevice) {
+    unsafe {
+        let mut physical_device_properties =
+            instance.get_physical_device_properties(physical_device);
+        let api_version = physical_device_properties.api_version;
+
+        log::info!("Device creation succeeded with: ");
+        log::info!(
+            "\tGPU_NAME: \"{}\"",
+            CStr::from_ptr(physical_device_properties.device_name.as_mut_ptr())
+                .to_str()
+                .unwrap_or("DEVICE_NAME_RETRIEVE_ERROR")
+        );
+        log::info!(
+            "\tGPU_TYPE: \"{:?}\"",
+            physical_device_properties.device_type
+        );
+        log::info!(
+            "\tAPI_VERSION: {}.{}.{}",
+            vk::api_version_major(api_version),
+            vk::api_version_minor(api_version),
+            vk::api_version_patch(api_version)
+        );
     }
 }
 
@@ -130,7 +158,7 @@ pub fn initialize_device(
         let physical_devices = match instance_info.instance.enumerate_physical_devices() {
             Ok(devices) => devices,
             Err(err) => {
-                println!(
+                log::error!(
                     "Failed to query for physical devices due to error \"{}\"",
                     err
                 );
@@ -154,7 +182,7 @@ pub fn initialize_device(
         });
 
         if optimal_device_opt == None {
-            println!("Failed to find adequate device!");
+            log::error!("Failed to find adequate device!");
             return Err(InitError::NoDevices);
         }
 
@@ -167,8 +195,6 @@ pub fn initialize_device(
         }
 
         let queue_prior = [1.0 as f32];
-
-        println!("queue index: {}", queue_family_info.compute_queue.unwrap());
 
         let mut queue_create_infos = Vec::new();
         queue_create_infos.push(DeviceQueueCreateInfo {
@@ -219,10 +245,12 @@ pub fn initialize_device(
         ) {
             Ok(dev) => dev,
             Err(e) => {
-                println!("Device creation failed with error \"{}\"", e);
+                log::error!("Device creation failed with error \"{}\"", e);
                 return Err(InitError::LogicalDeviceCreationFailure);
             }
         };
+
+        log_device_info(&instance_info.instance, &device, *physical_device);
 
         let compute_queue = device.get_device_queue(queue_family_info.compute_queue.unwrap(), 0);
 

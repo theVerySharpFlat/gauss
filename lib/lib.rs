@@ -7,8 +7,12 @@ use self::{
 };
 
 pub use allocation_strategy::Tensor;
-use gpu_allocator::vulkan::Allocator;
 pub use gpu_task::WorkGroupSize;
+pub use log_config::AllocatorLogConfig;
+pub use log_config::LogConfig;
+pub use log_config::ValidationLayerLogConfig;
+
+use gpu_allocator::vulkan::Allocator;
 
 mod allocation_strategy;
 mod command_buffer_util;
@@ -16,6 +20,7 @@ mod device;
 mod gpu_task;
 mod init_error;
 mod instance;
+mod log_config;
 mod pipeline;
 
 pub struct ComputeManager {
@@ -57,13 +62,19 @@ impl Drop for ComputeManager {
     }
 }
 
-pub fn compute_init() -> Result<ComputeManager, InitError> {
-    let instance_info = create_instance(true)?;
+pub fn compute_init(log_config: LogConfig) -> Result<ComputeManager, InitError> {
+    env_logger::init();
+
+    let instance_info = create_instance(log_config.validation_config)?;
     let device_info = initialize_device(&instance_info, true)?;
-    let allocator = match allocation_strategy::Allocator::new(&instance_info, &device_info) {
+    let allocator = match allocation_strategy::Allocator::new(
+        &instance_info,
+        &device_info,
+        log_config.allocator_config,
+    ) {
         Ok(a) => a,
         Err(e) => {
-            println!("Failed to create allocator! Error: {:?}", e);
+            log::error!("Failed to create allocator! Error: {:?}", e);
             return Err(InitError::AllocatorCreationFailure);
         }
     };

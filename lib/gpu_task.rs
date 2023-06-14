@@ -65,12 +65,12 @@ impl ComputeManager {
                     | BufferUsageFlags::TRANSFER_SRC
                     | BufferUsageFlags::TRANSFER_DST,
                 gpu_allocator::MemoryLocation::GpuOnly,
-                "gpu_only_alloc",
+                format!("gpu_only_alloc{{id={}}}", binding.id).as_str(),
                 self.device_info.queue_indices.compute_queue.unwrap(),
             ) {
                 Ok(b) => b,
                 Err(e) => {
-                    println!("Failed to allocate buffer! Error: {:?}", e);
+                    log::error!("Failed to allocate buffer! Error: {:?}", e);
                     return Err(GPUTaskRecordingError::BufferAllocationFailure);
                 }
             };
@@ -80,12 +80,12 @@ impl ComputeManager {
                 (binding.data().len() * 4) as u64,
                 BufferUsageFlags::TRANSFER_SRC,
                 gpu_allocator::MemoryLocation::CpuToGpu,
-                "gpu_staging_only_alloc",
+                format!("gpu_staging_only_alloc{{id={}}}", binding.id).as_str(),
                 self.device_info.queue_indices.compute_queue.unwrap(),
             ) {
                 Ok(b) => b,
                 Err(e) => {
-                    println!("Failed to allocate buffer! Error: {:?}", e);
+                    log::error!("Failed to allocate buffer! Error: {:?}", e);
                     return Err(GPUTaskRecordingError::BufferAllocationFailure);
                 }
             };
@@ -97,12 +97,12 @@ impl ComputeManager {
                         (binding.data().len() * 4) as u64,
                         BufferUsageFlags::TRANSFER_DST,
                         gpu_allocator::MemoryLocation::CpuToGpu,
-                        "gpu_staging_only_alloc",
+                        format!("gpu_staging_only_alloc{{id={}}}", binding.id).as_str(),
                         self.device_info.queue_indices.compute_queue.unwrap(),
                     ) {
                         Ok(b) => b,
                         Err(e) => {
-                            println!("Failed to allocate buffer! Error: {:?}", e);
+                            log::error!("Failed to allocate buffer! Error: {:?}", e);
                             return Err(GPUTaskRecordingError::BufferAllocationFailure);
                         }
                     },
@@ -136,7 +136,7 @@ impl ComputeManager {
             {
                 Ok(s) => s,
                 Err(e) => {
-                    println!("Failed to allocate descriptor set! Error: {}", e);
+                    log::error!("Failed to allocate descriptor set! Error: {}", e);
                     return Err(GPUTaskRecordingError::DescriptorSetAllocationFailure);
                 }
             }
@@ -185,7 +185,7 @@ impl ComputeManager {
         ) {
             Ok(b) => b,
             Err(e) => {
-                println!("Failed to allocate command buffer! Error: {}", e);
+                log::error!("Failed to allocate command buffer! Error: {}", e);
                 return Err(GPUTaskRecordingError::CommandBufferAllocationFailure);
             }
         };
@@ -197,7 +197,7 @@ impl ComputeManager {
         ) {
             Ok(_) => (),
             Err(e) => {
-                println!("Failed to begin command buffer recording! Error: {}", e);
+                log::error!("Failed to begin command buffer recording! Error: {}", e);
                 return Err(GPUTaskRecordingError::CommandBufferRecordingStartFailure);
             }
         }
@@ -237,7 +237,7 @@ impl ComputeManager {
         ) {
             Ok(f) => f,
             Err(e) => {
-                println!("Failed to submit command buffer! Error: {}", e);
+                log::error!("Failed to submit command buffer! Error: {}", e);
                 return None;
             }
         };
@@ -262,7 +262,7 @@ impl ComputeManager {
             let backing = match sync.parent.buffers.get(&tensor.id) {
                 Some(b) => b,
                 None => {
-                    println!(
+                    log::error!(
                         "Failed to find backing buffer for tensor! This is an internal issue!"
                     );
                     return;
@@ -292,7 +292,7 @@ impl<'a> GPUTask {
             let backing = match self.buffers.get(&tensor.id) {
                 Some(b) => b,
                 None => {
-                    println!(
+                    log::error!(
                         "Failed to find backing buffer for tensor! This is an internal issue!"
                     );
                     return;
@@ -376,7 +376,7 @@ impl<'a> GPUTask {
             let backing = match self.buffers.get(&tensor.id) {
                 Some(b) => b,
                 None => {
-                    println!(
+                    log::error!(
                         "Failed to find backing buffer for tensor! This is an internal issue!"
                     );
                     return;
@@ -384,7 +384,7 @@ impl<'a> GPUTask {
             };
 
             if backing.readback_buffer.is_none() {
-                println!("Tensor has no readback buffer! Did you enable readback on creation?");
+                log::error!("Tensor has no readback buffer! Did you enable readback on creation?");
                 return;
             }
 
