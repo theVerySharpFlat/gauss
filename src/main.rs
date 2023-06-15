@@ -7,10 +7,10 @@ pub fn main() {
         validation_config: Some(ValidationLayerLogConfig {
             log_errors: true,
             log_warnings: true,
-            log_verbose_info: false,
+            log_verbose_info: true,
         }),
         allocator_config: Some(AllocatorLogConfig {
-            log_memory_information: false,
+            log_memory_information: true,
             log_leaks_on_shutdown: true,
             store_stack_traces: false,
             log_allocations: false,
@@ -48,10 +48,11 @@ pub fn main() {
 
         let task = compute_manager
             .new_task(&pipeline, vec![&tensor_in, &tensor_out])
-            .unwrap()
             .op_local_sync_device(vec![&tensor_in, &tensor_out])
             .op_pipeline_dispatch(WorkGroupSize { x: 5, y: 1, z: 1 })
-            .op_device_sync_local(vec![&tensor_out]);
+            .op_device_sync_local(vec![&tensor_out])
+            .finalize()
+            .unwrap();
 
         let running_task = compute_manager.exec_task(&task).unwrap();
 
