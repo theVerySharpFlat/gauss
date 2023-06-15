@@ -1,6 +1,6 @@
 use std::{
     cmp::Ordering,
-    ffi::{CStr, CString},
+    ffi::CStr,
     ptr,
 };
 
@@ -124,7 +124,7 @@ fn create_compute_pool(device: &Device, queue_index: u32) -> Result<CommandPool,
     }
 }
 
-pub fn log_device_info(instance: &Instance, device: &Device, physical_device: PhysicalDevice) {
+pub fn log_device_info(instance: &Instance, _device: &Device, physical_device: PhysicalDevice) {
     unsafe {
         let mut physical_device_properties =
             instance.get_physical_device_properties(physical_device);

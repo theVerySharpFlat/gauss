@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ffi::c_void, ptr};
+use std::{collections::HashMap, default, ffi::c_void, ptr};
 
 use ash::vk::{
     AccessFlags, BufferCopy, BufferUsageFlags, CommandBuffer, DependencyFlags,
@@ -27,6 +27,11 @@ pub struct GPUTask {
     allocator: *mut Allocator, // :grimace:
 }
 
+pub struct GPUTaskInProcess {
+    errno: Option<GPUTaskRecordingError>,
+    task: Option<GPUTask>,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct WorkGroupSize {
     pub x: u32,
@@ -46,6 +51,7 @@ pub enum GPUTaskRecordingError {
     CommandBufferRecordingStartFailure,
     BufferAllocationFailure,
     DescriptorSetAllocationFailure,
+    UnknownError,
 }
 
 impl ComputeManager {
@@ -53,7 +59,7 @@ impl ComputeManager {
         &'a mut self,
         pipeline: &'a Pipeline,
         bindings: Vec<&Tensor>,
-    ) -> Result<GPUTask, GPUTaskRecordingError> {
+    ) -> GPUTaskInProcess {
         let mut buffer_backing = HashMap::<u32, TensorBufferBacking>::with_capacity(bindings.len());
 
         // Allocate buffers
@@ -71,7 +77,10 @@ impl ComputeManager {
                 Ok(b) => b,
                 Err(e) => {
                     log::error!("Failed to allocate buffer! Error: {:?}", e);
-                    return Err(GPUTaskRecordingError::BufferAllocationFailure);
+                    return GPUTaskInProcess {
+                        errno: Some(GPUTaskRecordingError::BufferAllocationFailure),
+                        task: None,
+                    };
                 }
             };
 
@@ -86,7 +95,10 @@ impl ComputeManager {
                 Ok(b) => b,
                 Err(e) => {
                     log::error!("Failed to allocate buffer! Error: {:?}", e);
-                    return Err(GPUTaskRecordingError::BufferAllocationFailure);
+                    return GPUTaskInProcess {
+                        errno: Some(GPUTaskRecordingError::BufferAllocationFailure),
+                        task: None,
+                    };
                 }
             };
 
@@ -103,7 +115,10 @@ impl ComputeManager {
                         Ok(b) => b,
                         Err(e) => {
                             log::error!("Failed to allocate buffer! Error: {:?}", e);
-                            return Err(GPUTaskRecordingError::BufferAllocationFailure);
+                            return GPUTaskInProcess {
+                                errno: Some(GPUTaskRecordingError::BufferAllocationFailure),
+                                task: None,
+                            };
                         }
                     },
                 )
@@ -137,7 +152,10 @@ impl ComputeManager {
                 Ok(s) => s,
                 Err(e) => {
                     log::error!("Failed to allocate descriptor set! Error: {}", e);
-                    return Err(GPUTaskRecordingError::DescriptorSetAllocationFailure);
+                    return GPUTaskInProcess {
+                        errno: Some(GPUTaskRecordingError::DescriptorSetAllocationFailure),
+                        task: None,
+                    };
                 }
             }
         };
@@ -186,7 +204,10 @@ impl ComputeManager {
             Ok(b) => b,
             Err(e) => {
                 log::error!("Failed to allocate command buffer! Error: {}", e);
-                return Err(GPUTaskRecordingError::CommandBufferAllocationFailure);
+                return GPUTaskInProcess {
+                    errno: Some(GPUTaskRecordingError::CommandBufferAllocationFailure),
+                    task: None,
+                };
             }
         };
 
@@ -198,7 +219,10 @@ impl ComputeManager {
             Ok(_) => (),
             Err(e) => {
                 log::error!("Failed to begin command buffer recording! Error: {}", e);
-                return Err(GPUTaskRecordingError::CommandBufferRecordingStartFailure);
+                return GPUTaskInProcess {
+                    errno: Some(GPUTaskRecordingError::CommandBufferRecordingStartFailure),
+                    task: None,
+                };
             }
         }
 
@@ -219,14 +243,17 @@ impl ComputeManager {
             );
         }
 
-        Ok(GPUTask {
-            command_buffer,
-            device_info: self.device_info.clone(),
-            buffers: buffer_backing,
-            descriptor_set: descriptor_set[0],
-            parent_descriptor_pool: pipeline.descriptor_pool,
-            allocator: &mut self.allocator,
-        })
+        GPUTaskInProcess {
+            task: Some(GPUTask {
+                command_buffer,
+                device_info: self.device_info.clone(),
+                buffers: buffer_backing,
+                descriptor_set: descriptor_set[0],
+                parent_descriptor_pool: pipeline.descriptor_pool,
+                allocator: &mut self.allocator,
+            }),
+            errno: None,
+        }
     }
 
     pub fn exec_task<'a>(&self, task: &'a GPUTask) -> Option<GPUSyncPrimitive<'a>> {
@@ -286,10 +313,14 @@ impl ComputeManager {
     }
 }
 
-impl<'a> GPUTask {
+impl<'a> GPUTaskInProcess {
     pub fn op_local_sync_device(self, tensors: Vec<&Tensor>) -> Self {
+        if self.task.is_none() || self.errno.is_some() {
+            return self;
+        }
+
         tensors.iter().for_each(|tensor| unsafe {
-            let backing = match self.buffers.get(&tensor.id) {
+            let backing = match self.task.as_ref().unwrap().buffers.get(&tensor.id) {
                 Some(b) => b,
                 None => {
                     log::error!(
@@ -310,41 +341,56 @@ impl<'a> GPUTask {
                     tensor.data().len() * 4 as usize,
                 );
 
-            self.device_info.device.cmd_copy_buffer(
-                self.command_buffer.clone(),
-                backing.staging_buffer.buffer.clone(),
-                backing.gpu_buffer.buffer.clone(),
-                &[BufferCopy {
-                    src_offset: 0,
-                    dst_offset: 0,
-                    size: (tensor.data().len() * 4) as u64,
-                }],
-            );
+            self.task
+                .as_ref()
+                .unwrap()
+                .device_info
+                .device
+                .cmd_copy_buffer(
+                    self.task.as_ref().unwrap().command_buffer.clone(),
+                    backing.staging_buffer.buffer.clone(),
+                    backing.gpu_buffer.buffer.clone(),
+                    &[BufferCopy {
+                        src_offset: 0,
+                        dst_offset: 0,
+                        size: (tensor.data().len() * 4) as u64,
+                    }],
+                );
         });
 
         unsafe {
-            self.device_info.device.cmd_pipeline_barrier(
-                self.command_buffer.clone(),
-                PipelineStageFlags::TRANSFER,
-                PipelineStageFlags::COMPUTE_SHADER,
-                DependencyFlags::empty(),
-                &[MemoryBarrier {
-                    s_type: StructureType::MEMORY_BARRIER,
-                    p_next: ptr::null(),
-                    src_access_mask: AccessFlags::MEMORY_WRITE,
-                    dst_access_mask: AccessFlags::MEMORY_WRITE | AccessFlags::MEMORY_READ,
-                }],
-                &[],
-                &[],
-            );
+            self.task
+                .as_ref()
+                .unwrap()
+                .device_info
+                .device
+                .cmd_pipeline_barrier(
+                    self.task.as_ref().unwrap().command_buffer.clone(),
+                    PipelineStageFlags::TRANSFER,
+                    PipelineStageFlags::COMPUTE_SHADER,
+                    DependencyFlags::empty(),
+                    &[MemoryBarrier {
+                        s_type: StructureType::MEMORY_BARRIER,
+                        p_next: ptr::null(),
+                        src_access_mask: AccessFlags::MEMORY_WRITE,
+                        dst_access_mask: AccessFlags::MEMORY_WRITE | AccessFlags::MEMORY_READ,
+                    }],
+                    &[],
+                    &[],
+                );
         }
+
         self
     }
 
     pub fn op_pipeline_dispatch(self, work_group: WorkGroupSize) -> Self {
+        if self.task.is_none() || self.errno.is_some() {
+            return self;
+        }
+
         unsafe {
-            self.device_info.device.cmd_dispatch(
-                self.command_buffer.clone(),
+            self.task.as_ref().unwrap().device_info.device.cmd_dispatch(
+                self.task.as_ref().unwrap().command_buffer.clone(),
                 work_group.x,
                 work_group.y,
                 work_group.z,
@@ -355,25 +401,34 @@ impl<'a> GPUTask {
     }
 
     pub fn op_device_sync_local(self, tensors: Vec<&Tensor>) -> Self {
+        if self.task.is_none() || self.errno.is_some() {
+            return self;
+        }
+
         unsafe {
-            self.device_info.device.cmd_pipeline_barrier(
-                self.command_buffer.clone(),
-                PipelineStageFlags::COMPUTE_SHADER,
-                PipelineStageFlags::TRANSFER,
-                DependencyFlags::empty(),
-                &[MemoryBarrier {
-                    s_type: StructureType::MEMORY_BARRIER,
-                    p_next: ptr::null(),
-                    src_access_mask: AccessFlags::MEMORY_WRITE,
-                    dst_access_mask: AccessFlags::MEMORY_READ,
-                }],
-                &[],
-                &[],
-            )
+            self.task
+                .as_ref()
+                .unwrap()
+                .device_info
+                .device
+                .cmd_pipeline_barrier(
+                    self.task.as_ref().unwrap().command_buffer.clone(),
+                    PipelineStageFlags::COMPUTE_SHADER,
+                    PipelineStageFlags::TRANSFER,
+                    DependencyFlags::empty(),
+                    &[MemoryBarrier {
+                        s_type: StructureType::MEMORY_BARRIER,
+                        p_next: ptr::null(),
+                        src_access_mask: AccessFlags::MEMORY_WRITE,
+                        dst_access_mask: AccessFlags::MEMORY_READ,
+                    }],
+                    &[],
+                    &[],
+                )
         }
 
         tensors.iter().for_each(|tensor| unsafe {
-            let backing = match self.buffers.get(&tensor.id) {
+            let backing = match self.task.as_ref().unwrap().buffers.get(&tensor.id) {
                 Some(b) => b,
                 None => {
                     log::error!(
@@ -388,19 +443,35 @@ impl<'a> GPUTask {
                 return;
             }
 
-            self.device_info.device.cmd_copy_buffer(
-                self.command_buffer.clone(),
-                backing.gpu_buffer.buffer.clone(),
-                backing.readback_buffer.as_ref().unwrap().buffer.clone(),
-                &[BufferCopy {
-                    src_offset: 0,
-                    dst_offset: 0,
-                    size: (tensor.data().len() * 4) as u64,
-                }],
-            )
+            self.task
+                .as_ref()
+                .unwrap()
+                .device_info
+                .device
+                .cmd_copy_buffer(
+                    self.task.as_ref().unwrap().command_buffer.clone(),
+                    backing.gpu_buffer.buffer.clone(),
+                    backing.readback_buffer.as_ref().unwrap().buffer.clone(),
+                    &[BufferCopy {
+                        src_offset: 0,
+                        dst_offset: 0,
+                        size: (tensor.data().len() * 4) as u64,
+                    }],
+                )
         });
 
         self
+    }
+
+    pub fn finalize(self) -> Result<GPUTask, GPUTaskRecordingError> {
+        if self.errno.is_some() {
+            return Err(self.errno.unwrap());
+        } else if self.task.is_some() {
+            return Ok(self.task.unwrap());
+        } else {
+            log::error!("This is an GPU task recording API error! Either you have done something really wrong or the API has a mistake in it that we haven't caught!");
+            return Err(GPUTaskRecordingError::UnknownError);
+        }
     }
 }
 

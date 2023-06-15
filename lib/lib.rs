@@ -65,6 +65,8 @@ impl Drop for ComputeManager {
 pub fn compute_init(log_config: LogConfig) -> Result<ComputeManager, InitError> {
     env_logger::init();
 
+    log::trace!("Hello world");
+
     let instance_info = create_instance(log_config.validation_config)?;
     let device_info = initialize_device(&instance_info, true)?;
     let allocator = match allocation_strategy::Allocator::new(
