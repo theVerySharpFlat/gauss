@@ -9,7 +9,7 @@ use ash::{
     vk::{
         self, ApplicationInfo, DebugUtilsMessageSeverityFlagsEXT, DebugUtilsMessageTypeFlagsEXT,
         DebugUtilsMessengerCreateInfoEXT, DebugUtilsMessengerEXT, InstanceCreateFlags,
-        InstanceCreateInfo, KhrGetPhysicalDeviceProperties2Fn, KhrPortabilityEnumerationFn,
+        InstanceCreateInfo,
         StructureType,
     },
     Entry, Instance,

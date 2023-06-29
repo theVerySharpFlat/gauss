@@ -7,8 +7,9 @@ use std::{
 
 use ash::vk::{
     AccessFlags, BufferCopy, BufferUsageFlags, CommandBuffer, DependencyFlags,
-    DescriptorBufferInfo, DescriptorPool, DescriptorSet, DescriptorSetAllocateInfo, DescriptorType,
-    Fence, MemoryBarrier, PipelineBindPoint, PipelineStageFlags, StructureType, WriteDescriptorSet,
+    DescriptorBufferInfo, DescriptorPool, DescriptorPoolCreateFlags, DescriptorPoolCreateInfo,
+    DescriptorPoolSize, DescriptorSet, DescriptorSetAllocateInfo, DescriptorType, Fence,
+    MemoryBarrier, PipelineBindPoint, PipelineStageFlags, StructureType, WriteDescriptorSet, DescriptorPoolResetFlags,
 };
 
 use super::{
@@ -29,10 +30,9 @@ pub struct GPUTask {
     buffers: HashMap<u32, TensorBufferBacking>,
     descriptor_set: DescriptorSet,
     parent_descriptor_pool: DescriptorPool,
-    // allocator: *mut Allocator, // :grimace:
     allocator: Arc<RwLock<Allocator>>,
 
-    parent: Arc<ComputeManager>
+    _parent: Arc<ComputeManager>,
 }
 
 pub struct GPUTaskInProcess {
@@ -154,10 +154,41 @@ impl ComputeManager {
             buffer_backing.insert(binding.id, backing);
         }
 
+        let pool_size = DescriptorPoolSize {
+            ty: DescriptorType::STORAGE_BUFFER,
+            descriptor_count: bindings.len() as u32,
+        };
+
+        let descriptor_pool_create_info = DescriptorPoolCreateInfo {
+            s_type: StructureType::DESCRIPTOR_POOL_CREATE_INFO,
+            p_next: ptr::null(),
+            flags: DescriptorPoolCreateFlags::empty(),
+            max_sets: 10,
+            pool_size_count: 1,
+            p_pool_sizes: &pool_size,
+        };
+
+        let descriptor_pool = unsafe {
+            match self
+                .device_info
+                .device
+                .create_descriptor_pool(&descriptor_pool_create_info, None)
+            {
+                Ok(p) => p,
+                Err(e) => {
+                    log::error!("Failed to create descriptor pool! Error: {}", e);
+                    return GPUTaskInProcess {
+                        errno: Some(GPUTaskRecordingError::DescriptorSetAllocationFailure),
+                        task: None,
+                    };
+                }
+            }
+        };
+
         let descriptor_set_alloc_info = DescriptorSetAllocateInfo {
             s_type: StructureType::DESCRIPTOR_SET_ALLOCATE_INFO,
             p_next: ptr::null(),
-            descriptor_pool: pipeline.descriptor_pool,
+            descriptor_pool,
             descriptor_set_count: 1,
             p_set_layouts: &pipeline.descriptor_set_layout,
         };
@@ -268,9 +299,9 @@ impl ComputeManager {
                 device_info: self.device_info.clone(),
                 buffers: buffer_backing,
                 descriptor_set: descriptor_set[0],
-                parent_descriptor_pool: pipeline.descriptor_pool,
+                parent_descriptor_pool: descriptor_pool,
                 allocator: self.allocator.clone(),
-                parent: self.clone(),
+                _parent: self.clone(),
             }),
             errno: None,
         }
@@ -503,6 +534,9 @@ impl<'a> Drop for GPUTask {
                 &[self.command_buffer.clone()],
             );
 
+            let _ = self.device_info.device.reset_descriptor_pool(self.parent_descriptor_pool, DescriptorPoolResetFlags::empty());
+            let _ = self.device_info.device.destroy_descriptor_pool(self.parent_descriptor_pool, None);
+
             // Free backing buffers
             self.buffers.iter_mut().for_each(|(_, buffer)| {
                 let gpu_alloc = std::mem::take(&mut buffer.gpu_buffer.allocation);
@@ -531,11 +565,6 @@ impl<'a> Drop for GPUTask {
                     log::error!("Failed to acquire allocator for GPU task!");
                 }
             });
-
-            let _ = self
-                .device_info
-                .device
-                .free_descriptor_sets(self.parent_descriptor_pool, &[self.descriptor_set]);
         }
     }
 }

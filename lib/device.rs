@@ -5,7 +5,7 @@ use ash::{
         self, CommandPool, CommandPoolCreateFlags, CommandPoolCreateInfo, DeviceCreateFlags,
         DeviceCreateInfo, DeviceQueueCreateFlags, DeviceQueueCreateInfo, PhysicalDevice,
         PhysicalDeviceFeatures, PhysicalDeviceType, Queue, QueueFamilyProperties, QueueFlags,
-        StructureType,
+        StructureType 
     },
     Device, Instance,
 };

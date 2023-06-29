@@ -1,8 +1,8 @@
 use std::{ffi::CString, ptr, str::FromStr, sync::Arc};
 
 use ash::vk::{
-    self, ComputePipelineCreateInfo, DescriptorPoolCreateFlags, DescriptorPoolCreateInfo,
-    DescriptorPoolSize, DescriptorSetLayoutBinding, DescriptorSetLayoutCreateFlags,
+    self, ComputePipelineCreateInfo,
+    DescriptorSetLayoutBinding, DescriptorSetLayoutCreateFlags,
     DescriptorSetLayoutCreateInfo, DescriptorType, PipelineCache, PipelineCreateFlags,
     PipelineLayoutCreateFlags, PipelineLayoutCreateInfo, PipelineShaderStageCreateFlags,
     PipelineShaderStageCreateInfo, ShaderModule, ShaderModuleCreateFlags, ShaderModuleCreateInfo,
@@ -28,7 +28,7 @@ pub struct Pipeline {
     pub(super) pipeline_layout: vk::PipelineLayout,
 
     pub(super) descriptor_set_layout: vk::DescriptorSetLayout,
-    pub(super) descriptor_pool: vk::DescriptorPool,
+    // pub(super) descriptor_pool: vk::DescriptorPool,
 
     parent: Arc<ComputeManager>,
 }
@@ -201,39 +201,11 @@ impl ComputeManager {
                 .destroy_shader_module(program.shader_module, None)
         }
 
-        let pool_size = DescriptorPoolSize {
-            ty: DescriptorType::STORAGE_BUFFER,
-            descriptor_count: n_tensors as u32,
-        };
-
-        let descriptor_pool_create_info = DescriptorPoolCreateInfo {
-            s_type: StructureType::DESCRIPTOR_POOL_CREATE_INFO,
-            p_next: ptr::null(),
-            flags: DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET,
-            max_sets: 10,
-            pool_size_count: 1,
-            p_pool_sizes: &pool_size,
-        };
-
-        let descriptor_pool = unsafe {
-            match self
-                .device_info
-                .device
-                .create_descriptor_pool(&descriptor_pool_create_info, None)
-            {
-                Ok(p) => p,
-                Err(e) => {
-                    log::error!("Failed to create descriptor pool! Error: {}", e);
-                    return Err(PipelineCreateError::DescriptorPoolCreationFailure);
-                }
-            }
-        };
-
         Ok(Pipeline {
             pipeline,
             pipeline_layout,
             descriptor_set_layout,
-            descriptor_pool,
+            //descriptor_pool,
             parent: self.clone(),
         })
     }
@@ -250,10 +222,6 @@ impl<'a> Drop for Pipeline {
                 .device_info
                 .device
                 .destroy_descriptor_set_layout(self.descriptor_set_layout, None);
-            self.parent
-                .device_info
-                .device
-                .destroy_descriptor_pool(self.descriptor_pool, None);
             self.parent
                 .device_info
                 .device
