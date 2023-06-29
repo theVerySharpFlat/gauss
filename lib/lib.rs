@@ -1,6 +1,5 @@
 use std::{
     mem::MaybeUninit,
-    ops::Deref,
     sync::{atomic::AtomicU32, Arc, RwLock},
 };
 
@@ -18,7 +17,6 @@ pub use log_config::LogConfig;
 pub use log_config::ValidationLayerLogConfig;
 
 mod allocation_strategy;
-mod descriptor_set_allocation_strategy;
 mod command_buffer_util;
 mod device;
 mod gpu_task;
