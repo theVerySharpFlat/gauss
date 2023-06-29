@@ -1,8 +1,4 @@
-use std::{
-    cmp::Ordering,
-    ffi::CStr,
-    ptr,
-};
+use std::{cmp::Ordering, ffi::CStr, ptr};
 
 use ash::{
     vk::{

@@ -1,4 +1,4 @@
-use std::{ffi::CString, ptr, str::FromStr};
+use std::{ffi::CString, ptr, str::FromStr, sync::Arc};
 
 use ash::vk::{
     self, ComputePipelineCreateInfo, DescriptorPoolCreateFlags, DescriptorPoolCreateInfo,
@@ -11,7 +11,7 @@ use ash::vk::{
 
 use shaderc;
 
-use super::{device::DeviceInfo, ComputeManager};
+use super::ComputeManager;
 
 #[derive(Clone, Copy, Debug)]
 pub enum PipelineCreateError {
@@ -30,7 +30,7 @@ pub struct Pipeline {
     pub(super) descriptor_set_layout: vk::DescriptorSetLayout,
     pub(super) descriptor_pool: vk::DescriptorPool,
 
-    device: DeviceInfo,
+    parent: Arc<ComputeManager>,
 }
 
 pub struct Program {
@@ -99,7 +99,7 @@ impl ComputeManager {
     }
 
     pub fn build_pipeline(
-        self: &Self,
+        self: Arc<Self>,
         program: Program,
         n_tensors: u32,
     ) -> Result<Pipeline, PipelineCreateError> {
@@ -234,7 +234,7 @@ impl ComputeManager {
             pipeline_layout,
             descriptor_set_layout,
             descriptor_pool,
-            device: self.device_info.clone(),
+            parent: self.clone(),
         })
     }
 }
@@ -242,16 +242,22 @@ impl ComputeManager {
 impl<'a> Drop for Pipeline {
     fn drop(&mut self) {
         unsafe {
-            self.device
+            self.parent
+                .device_info
                 .device
                 .destroy_pipeline_layout(self.pipeline_layout, None);
-            self.device
+            self.parent
+                .device_info
                 .device
                 .destroy_descriptor_set_layout(self.descriptor_set_layout, None);
-            self.device
+            self.parent
+                .device_info
                 .device
                 .destroy_descriptor_pool(self.descriptor_pool, None);
-            self.device.device.destroy_pipeline(self.pipeline, None);
+            self.parent
+                .device_info
+                .device
+                .destroy_pipeline(self.pipeline, None);
         }
     }
 }

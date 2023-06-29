@@ -1,4 +1,9 @@
-use std::{collections::HashMap, default, ffi::c_void, ptr};
+use std::{
+    collections::HashMap,
+    ffi::c_void,
+    ptr,
+    sync::{Arc, RwLock},
+};
 
 use ash::vk::{
     AccessFlags, BufferCopy, BufferUsageFlags, CommandBuffer, DependencyFlags,
@@ -24,7 +29,10 @@ pub struct GPUTask {
     buffers: HashMap<u32, TensorBufferBacking>,
     descriptor_set: DescriptorSet,
     parent_descriptor_pool: DescriptorPool,
-    allocator: *mut Allocator, // :grimace:
+    // allocator: *mut Allocator, // :grimace:
+    allocator: Arc<RwLock<Allocator>>,
+
+    parent: Arc<ComputeManager>
 }
 
 pub struct GPUTaskInProcess {
@@ -56,7 +64,7 @@ pub enum GPUTaskRecordingError {
 
 impl ComputeManager {
     pub fn new_task<'a>(
-        &'a mut self,
+        self: Arc<Self>,
         pipeline: &'a Pipeline,
         bindings: Vec<&Tensor>,
     ) -> GPUTaskInProcess {
@@ -64,7 +72,18 @@ impl ComputeManager {
 
         // Allocate buffers
         for (_i, binding) in bindings.iter().enumerate() {
-            let gpu_buffer = match self.allocator.allocate_buffer(
+            let mut allocator_actual = match self.allocator.write() {
+                Ok(a) => a,
+                Err(e) => {
+                    log::error!("Failed to acquire allocator! Error: {e}");
+                    return GPUTaskInProcess {
+                        errno: Some(GPUTaskRecordingError::BufferAllocationFailure),
+                        task: None,
+                    };
+                }
+            };
+
+            let gpu_buffer = match allocator_actual.allocate_buffer(
                 &self.device_info,
                 (binding.data().len() * 4) as u64,
                 BufferUsageFlags::STORAGE_BUFFER
@@ -84,7 +103,7 @@ impl ComputeManager {
                 }
             };
 
-            let staging_buffer = match self.allocator.allocate_buffer(
+            let staging_buffer = match allocator_actual.allocate_buffer(
                 &self.device_info,
                 (binding.data().len() * 4) as u64,
                 BufferUsageFlags::TRANSFER_SRC,
@@ -104,7 +123,7 @@ impl ComputeManager {
 
             let readback_buffer = if binding.readback_enabled {
                 Some(
-                    match self.allocator.allocate_buffer(
+                    match allocator_actual.allocate_buffer(
                         &self.device_info,
                         (binding.data().len() * 4) as u64,
                         BufferUsageFlags::TRANSFER_DST,
@@ -250,7 +269,8 @@ impl ComputeManager {
                 buffers: buffer_backing,
                 descriptor_set: descriptor_set[0],
                 parent_descriptor_pool: pipeline.descriptor_pool,
-                allocator: &mut self.allocator,
+                allocator: self.allocator.clone(),
+                parent: self.clone(),
             }),
             errno: None,
         }
@@ -486,24 +506,29 @@ impl<'a> Drop for GPUTask {
             // Free backing buffers
             self.buffers.iter_mut().for_each(|(_, buffer)| {
                 let gpu_alloc = std::mem::take(&mut buffer.gpu_buffer.allocation);
-                let _ = (*self.allocator).vulkan_allocator.free(gpu_alloc);
-                self.device_info
-                    .device
-                    .destroy_buffer(buffer.gpu_buffer.buffer, None);
-
-                let stage_alloc = std::mem::take(&mut buffer.staging_buffer.allocation);
-                let _ = (*self.allocator).vulkan_allocator.free(stage_alloc);
-                self.device_info
-                    .device
-                    .destroy_buffer(buffer.staging_buffer.buffer, None);
-
-                if buffer.readback_buffer.is_some() {
-                    let readback_alloc =
-                        std::mem::take(&mut buffer.readback_buffer.as_mut().unwrap().allocation);
-                    let _ = (*self.allocator).vulkan_allocator.free(readback_alloc);
+                if let Ok(mut allocator_actual) = self.allocator.write() {
+                    let _ = allocator_actual.vulkan_allocator.free(gpu_alloc);
                     self.device_info
                         .device
-                        .destroy_buffer(buffer.readback_buffer.as_mut().unwrap().buffer, None);
+                        .destroy_buffer(buffer.gpu_buffer.buffer, None);
+
+                    let stage_alloc = std::mem::take(&mut buffer.staging_buffer.allocation);
+                    let _ = allocator_actual.vulkan_allocator.free(stage_alloc);
+                    self.device_info
+                        .device
+                        .destroy_buffer(buffer.staging_buffer.buffer, None);
+
+                    if buffer.readback_buffer.is_some() {
+                        let readback_alloc = std::mem::take(
+                            &mut buffer.readback_buffer.as_mut().unwrap().allocation,
+                        );
+                        let _ = allocator_actual.vulkan_allocator.free(readback_alloc);
+                        self.device_info
+                            .device
+                            .destroy_buffer(buffer.readback_buffer.as_mut().unwrap().buffer, None);
+                    }
+                } else {
+                    log::error!("Failed to acquire allocator for GPU task!");
                 }
             });
 
