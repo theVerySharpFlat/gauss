@@ -42,12 +42,9 @@ pub enum AllocationError {
 }
 
 impl ComputeManager {
-    pub fn create_tensor(&mut self, data: Array<f32, Ix1>, enable_readback: bool) -> Tensor {
+    pub fn create_tensor(&self, data: Array<f32, Ix1>, enable_readback: bool) -> Tensor {
         Tensor {
-            id: {
-                self.current_tensor_id += 1;
-                self.current_tensor_id - 1
-            },
+            id: self.current_tensor_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             readback_enabled: enable_readback,
             local_data: data,
         }
@@ -168,5 +165,16 @@ impl Allocator {
             buffer,
             allocation: buffer_allocation,
         })
+    }
+}
+
+impl Drop for Allocator {
+    fn drop(&mut self) {
+        // evil
+        #[allow(invalid_value)]
+        let mut swapped_out: VulkanAllocator = unsafe { std::mem::MaybeUninit::zeroed().assume_init() };
+        std::mem::swap(&mut swapped_out, &mut self.vulkan_allocator);
+
+        drop(swapped_out); 
     }
 }

@@ -1,4 +1,8 @@
-use std::mem::MaybeUninit;
+use std::{
+    mem::MaybeUninit,
+    ops::Deref,
+    sync::{atomic::AtomicU32, Arc, RwLock},
+};
 
 use self::{
     device::{initialize_device, DeviceInfo},
@@ -6,15 +10,15 @@ use self::{
     instance::{create_instance, InstanceInfo},
 };
 
+use allocation_strategy::Allocator;
 pub use allocation_strategy::Tensor;
 pub use gpu_task::WorkGroupSize;
 pub use log_config::AllocatorLogConfig;
 pub use log_config::LogConfig;
 pub use log_config::ValidationLayerLogConfig;
 
-use gpu_allocator::vulkan::Allocator;
-
 mod allocation_strategy;
+mod descriptor_set_allocation_strategy;
 mod command_buffer_util;
 mod device;
 mod gpu_task;
@@ -26,8 +30,8 @@ mod pipeline;
 pub struct ComputeManager {
     instance_info: InstanceInfo,
     device_info: DeviceInfo,
-    allocator: allocation_strategy::Allocator,
-    current_tensor_id: u32,
+    allocator: Arc<RwLock<allocation_strategy::Allocator>>,
+    current_tensor_id: AtomicU32,
 }
 
 impl Drop for ComputeManager {
@@ -40,11 +44,13 @@ impl Drop for ComputeManager {
                 .destroy_command_pool(self.device_info.compute_pool, None);
 
             // Free the VkMemory allocations made by the allocator
-            #[allow(invalid_value)]
-            let mut dummy_allocator: Allocator = MaybeUninit::zeroed().assume_init();
+            if let Ok(mut allocator) = self.allocator.write() {
+                #[allow(invalid_value)]
+                let mut to_drop: Allocator = MaybeUninit::zeroed().assume_init();
+                std::mem::swap(&mut (*allocator), &mut to_drop);
 
-            std::mem::swap(&mut self.allocator.vulkan_allocator, &mut dummy_allocator);
-            drop(dummy_allocator);
+                drop(to_drop);
+            }
 
             self.device_info.device.destroy_device(None);
             if self.instance_info.debug_utils_loader.is_some() {
@@ -62,7 +68,7 @@ impl Drop for ComputeManager {
     }
 }
 
-pub fn compute_init(log_config: LogConfig) -> Result<ComputeManager, InitError> {
+pub fn compute_init(log_config: LogConfig) -> Result<Arc<ComputeManager>, InitError> {
     env_logger::init();
 
     log::trace!("Hello world");
@@ -81,10 +87,10 @@ pub fn compute_init(log_config: LogConfig) -> Result<ComputeManager, InitError> 
         }
     };
 
-    Ok(ComputeManager {
+    Ok(Arc::new(ComputeManager {
         instance_info,
         device_info,
-        allocator,
-        current_tensor_id: 0,
-    })
+        allocator: Arc::new(RwLock::new(allocator)),
+        current_tensor_id: AtomicU32::new(0),
+    }))
 }
