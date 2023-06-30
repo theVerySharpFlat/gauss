@@ -9,8 +9,6 @@ use ash::vk::{
     ShaderStageFlags, StructureType,
 };
 
-use shaderc;
-
 use super::ComputeManager;
 
 #[derive(Clone, Copy, Debug)]
@@ -46,7 +44,7 @@ pub enum ProgramCompilationError {
 
 impl ComputeManager {
     pub fn compile_program(
-        self: &Self,
+        &self,
         shader: &str,
         name: &str,
         optimize: bool,
@@ -106,7 +104,7 @@ impl ComputeManager {
         let mut descriptor_set_bindings: Vec<DescriptorSetLayoutBinding> = Vec::new();
         for i in 0..n_tensors {
             descriptor_set_bindings.push(DescriptorSetLayoutBinding {
-                binding: i as u32,
+                binding: i,
                 descriptor_type: DescriptorType::STORAGE_BUFFER,
                 descriptor_count: 1,
                 stage_flags: ShaderStageFlags::COMPUTE,
@@ -176,7 +174,7 @@ impl ComputeManager {
             p_next: std::ptr::null(),
             flags: PipelineCreateFlags::empty(),
             stage: shader_stage_create_info,
-            layout: pipeline_layout.clone(),
+            layout: pipeline_layout,
             base_pipeline_handle: vk::Pipeline::null(),
             base_pipeline_index: -1,
         };
@@ -206,12 +204,12 @@ impl ComputeManager {
             pipeline_layout,
             descriptor_set_layout,
             //descriptor_pool,
-            parent: self.clone(),
+            parent: self,
         })
     }
 }
 
-impl<'a> Drop for Pipeline {
+impl Drop for Pipeline {
     fn drop(&mut self) {
         unsafe {
             self.parent

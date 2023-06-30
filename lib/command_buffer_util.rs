@@ -74,10 +74,10 @@ pub fn end_and_submit_command_buffer(
 
         let fence = device.create_fence(&fence_create_info, None)?;
 
-        match device.queue_submit(dst_queue, &[submit_info], fence.clone()) {
+        match device.queue_submit(dst_queue, &[submit_info], fence) {
             Ok(_) => Ok(fence),
             Err(e) => {
-                device.destroy_fence(fence.clone(), None);
+                device.destroy_fence(fence, None);
                 Err(e)
             }
         }

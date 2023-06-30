@@ -134,6 +134,7 @@ pub fn create_instance(
             b"VK_LAYER_KHRONOS_validation\0",
         )];
 
+        #[allow(unused_mut)]
         let mut instance_flags = InstanceCreateFlags::default();
         #[cfg(any(target_os = "macos"))]
         {

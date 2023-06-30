@@ -130,7 +130,7 @@ impl Allocator {
         let buffer_memory_requirements = unsafe {
             device_info
                 .device
-                .get_buffer_memory_requirements(buffer.clone())
+                .get_buffer_memory_requirements(buffer)
         };
 
         let buffer_allocation = match self.vulkan_allocator.allocate(&AllocationCreateDesc {

@@ -43,7 +43,6 @@ pub fn main() {
         .clone()
         .build_pipeline(
             compute_manager
-                .clone()
                 .compile_program(shader, "basic_compute", true)
                 .unwrap(),
             2,
