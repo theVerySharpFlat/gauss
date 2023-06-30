@@ -5,7 +5,7 @@ use ash::{
         self, CommandPool, CommandPoolCreateFlags, CommandPoolCreateInfo, DeviceCreateFlags,
         DeviceCreateInfo, DeviceQueueCreateFlags, DeviceQueueCreateInfo, PhysicalDevice,
         PhysicalDeviceFeatures, PhysicalDeviceType, Queue, QueueFamilyProperties, QueueFlags,
-        StructureType,
+        StructureType 
     },
     Device, Instance,
 };
@@ -62,8 +62,8 @@ pub struct QueueFamilyInfo {
 }
 
 impl QueueFamilyInfo {
-    fn complete(self: &Self) -> bool {
-        return self.compute_queue.is_some();
+    fn complete(&self) -> bool {
+        self.compute_queue.is_some()
     }
 }
 
@@ -82,7 +82,7 @@ fn load_queue_family_info(instance: &Instance, physical_device: PhysicalDevice) 
         };
 
         let queue_family_infos =
-            instance.get_physical_device_queue_family_properties(physical_device.clone());
+            instance.get_physical_device_queue_family_properties(physical_device);
 
         let best_queue = queue_family_infos
             .iter()
@@ -92,10 +92,7 @@ fn load_queue_family_info(instance: &Instance, physical_device: PhysicalDevice) 
                 score_queue(a).cmp(&b_score)
             });
 
-        let compute_queue = match best_queue {
-            Some((queue, _)) => Some(queue as u32),
-            None => None,
-        };
+        let compute_queue = best_queue.map(|(queue, _)| queue as u32);
 
         QueueFamilyInfo { compute_queue }
     }
@@ -166,18 +163,18 @@ pub fn initialize_device(
             let b_score = score_device(&instance_info.instance, **b);
             let a_score = score_device(&instance_info.instance, **a);
 
-            if b_score == a_score && a_score == None {
+            if b_score == a_score && a_score.is_none() {
                 Ordering::Equal
-            } else if b_score == None {
+            } else if b_score.is_none() {
                 Ordering::Greater
-            } else if a_score == None {
+            } else if a_score.is_none() {
                 Ordering::Less
             } else {
                 a_score.cmp(&b_score)
             }
         });
 
-        if optimal_device_opt == None {
+        if optimal_device_opt.is_none() {
             log::error!("Failed to find adequate device!");
             return Err(InitError::NoDevices);
         }
@@ -185,22 +182,23 @@ pub fn initialize_device(
         let physical_device = optimal_device_opt.unwrap();
 
         let queue_family_info =
-            load_queue_family_info(&instance_info.instance, physical_device.clone());
+            load_queue_family_info(&instance_info.instance, *physical_device);
         if !queue_family_info.complete() {
             return Err(InitError::NoComputeQueue);
         }
 
-        let queue_prior = [1.0 as f32];
+        let queue_prior = [1.0_f32];
 
-        let mut queue_create_infos = Vec::new();
-        queue_create_infos.push(DeviceQueueCreateInfo {
+        #[allow(unused_mut)]
+        let mut queue_create_infos = vec![ 
+        DeviceQueueCreateInfo {
             s_type: StructureType::DEVICE_QUEUE_CREATE_INFO,
             p_next: ptr::null(),
             flags: DeviceQueueCreateFlags::empty(),
             queue_family_index: queue_family_info.compute_queue.unwrap(),
             queue_count: 1,
             p_queue_priorities: queue_prior.as_ptr(),
-        });
+        }];
 
         let physical_device_features = PhysicalDeviceFeatures {
             ..Default::default()
@@ -235,7 +233,7 @@ pub fn initialize_device(
         };
 
         let device = match instance_info.instance.create_device(
-            physical_device.clone(),
+            *physical_device,
             &device_create_info,
             None,
         ) {
@@ -250,12 +248,12 @@ pub fn initialize_device(
 
         let compute_queue = device.get_device_queue(queue_family_info.compute_queue.unwrap(), 0);
 
-        return Ok(DeviceInfo {
+        Ok(DeviceInfo {
             device: device.clone(),
             compute_queue,
             physical_device: *physical_device,
-            queue_indices: load_queue_family_info(&instance_info.instance, physical_device.clone()),
+            queue_indices: load_queue_family_info(&instance_info.instance, *physical_device),
             compute_pool: create_compute_pool(&device, queue_family_info.compute_queue.unwrap())?,
-        });
+        })
     }
 }

@@ -1,15 +1,13 @@
 use std::{ffi::CString, ptr, str::FromStr, sync::Arc};
 
 use ash::vk::{
-    self, ComputePipelineCreateInfo, DescriptorPoolCreateFlags, DescriptorPoolCreateInfo,
-    DescriptorPoolSize, DescriptorSetLayoutBinding, DescriptorSetLayoutCreateFlags,
+    self, ComputePipelineCreateInfo,
+    DescriptorSetLayoutBinding, DescriptorSetLayoutCreateFlags,
     DescriptorSetLayoutCreateInfo, DescriptorType, PipelineCache, PipelineCreateFlags,
     PipelineLayoutCreateFlags, PipelineLayoutCreateInfo, PipelineShaderStageCreateFlags,
     PipelineShaderStageCreateInfo, ShaderModule, ShaderModuleCreateFlags, ShaderModuleCreateInfo,
     ShaderStageFlags, StructureType,
 };
-
-use shaderc;
 
 use super::ComputeManager;
 
@@ -28,7 +26,7 @@ pub struct Pipeline {
     pub(super) pipeline_layout: vk::PipelineLayout,
 
     pub(super) descriptor_set_layout: vk::DescriptorSetLayout,
-    pub(super) descriptor_pool: vk::DescriptorPool,
+    // pub(super) descriptor_pool: vk::DescriptorPool,
 
     parent: Arc<ComputeManager>,
 }
@@ -46,7 +44,7 @@ pub enum ProgramCompilationError {
 
 impl ComputeManager {
     pub fn compile_program(
-        self: &Self,
+        &self,
         shader: &str,
         name: &str,
         optimize: bool,
@@ -106,7 +104,7 @@ impl ComputeManager {
         let mut descriptor_set_bindings: Vec<DescriptorSetLayoutBinding> = Vec::new();
         for i in 0..n_tensors {
             descriptor_set_bindings.push(DescriptorSetLayoutBinding {
-                binding: i as u32,
+                binding: i,
                 descriptor_type: DescriptorType::STORAGE_BUFFER,
                 descriptor_count: 1,
                 stage_flags: ShaderStageFlags::COMPUTE,
@@ -176,7 +174,7 @@ impl ComputeManager {
             p_next: std::ptr::null(),
             flags: PipelineCreateFlags::empty(),
             stage: shader_stage_create_info,
-            layout: pipeline_layout.clone(),
+            layout: pipeline_layout,
             base_pipeline_handle: vk::Pipeline::null(),
             base_pipeline_index: -1,
         };
@@ -201,45 +199,17 @@ impl ComputeManager {
                 .destroy_shader_module(program.shader_module, None)
         }
 
-        let pool_size = DescriptorPoolSize {
-            ty: DescriptorType::STORAGE_BUFFER,
-            descriptor_count: n_tensors as u32,
-        };
-
-        let descriptor_pool_create_info = DescriptorPoolCreateInfo {
-            s_type: StructureType::DESCRIPTOR_POOL_CREATE_INFO,
-            p_next: ptr::null(),
-            flags: DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET,
-            max_sets: 10,
-            pool_size_count: 1,
-            p_pool_sizes: &pool_size,
-        };
-
-        let descriptor_pool = unsafe {
-            match self
-                .device_info
-                .device
-                .create_descriptor_pool(&descriptor_pool_create_info, None)
-            {
-                Ok(p) => p,
-                Err(e) => {
-                    log::error!("Failed to create descriptor pool! Error: {}", e);
-                    return Err(PipelineCreateError::DescriptorPoolCreationFailure);
-                }
-            }
-        };
-
         Ok(Pipeline {
             pipeline,
             pipeline_layout,
             descriptor_set_layout,
-            descriptor_pool,
-            parent: self.clone(),
+            //descriptor_pool,
+            parent: self,
         })
     }
 }
 
-impl<'a> Drop for Pipeline {
+impl Drop for Pipeline {
     fn drop(&mut self) {
         unsafe {
             self.parent
@@ -250,10 +220,6 @@ impl<'a> Drop for Pipeline {
                 .device_info
                 .device
                 .destroy_descriptor_set_layout(self.descriptor_set_layout, None);
-            self.parent
-                .device_info
-                .device
-                .destroy_descriptor_pool(self.descriptor_pool, None);
             self.parent
                 .device_info
                 .device

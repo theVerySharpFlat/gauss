@@ -7,8 +7,9 @@ use std::{
 
 use ash::vk::{
     AccessFlags, BufferCopy, BufferUsageFlags, CommandBuffer, DependencyFlags,
-    DescriptorBufferInfo, DescriptorPool, DescriptorSet, DescriptorSetAllocateInfo, DescriptorType,
-    Fence, MemoryBarrier, PipelineBindPoint, PipelineStageFlags, StructureType, WriteDescriptorSet,
+    DescriptorBufferInfo, DescriptorPool, DescriptorPoolCreateFlags, DescriptorPoolCreateInfo,
+    DescriptorPoolSize, DescriptorSet, DescriptorSetAllocateInfo, DescriptorType, Fence,
+    MemoryBarrier, PipelineBindPoint, PipelineStageFlags, StructureType, WriteDescriptorSet, DescriptorPoolResetFlags,
 };
 
 use super::{
@@ -29,10 +30,9 @@ pub struct GPUTask {
     buffers: HashMap<u32, TensorBufferBacking>,
     descriptor_set: DescriptorSet,
     parent_descriptor_pool: DescriptorPool,
-    // allocator: *mut Allocator, // :grimace:
     allocator: Arc<RwLock<Allocator>>,
 
-    parent: Arc<ComputeManager>
+    _parent: Arc<ComputeManager>,
 }
 
 pub struct GPUTaskInProcess {
@@ -63,9 +63,9 @@ pub enum GPUTaskRecordingError {
 }
 
 impl ComputeManager {
-    pub fn new_task<'a>(
+    pub fn new_task(
         self: Arc<Self>,
-        pipeline: &'a Pipeline,
+        pipeline: &Pipeline,
         bindings: Vec<&Tensor>,
     ) -> GPUTaskInProcess {
         let mut buffer_backing = HashMap::<u32, TensorBufferBacking>::with_capacity(bindings.len());
@@ -154,10 +154,41 @@ impl ComputeManager {
             buffer_backing.insert(binding.id, backing);
         }
 
+        let pool_size = DescriptorPoolSize {
+            ty: DescriptorType::STORAGE_BUFFER,
+            descriptor_count: bindings.len() as u32,
+        };
+
+        let descriptor_pool_create_info = DescriptorPoolCreateInfo {
+            s_type: StructureType::DESCRIPTOR_POOL_CREATE_INFO,
+            p_next: ptr::null(),
+            flags: DescriptorPoolCreateFlags::empty(),
+            max_sets: 10,
+            pool_size_count: 1,
+            p_pool_sizes: &pool_size,
+        };
+
+        let descriptor_pool = unsafe {
+            match self
+                .device_info
+                .device
+                .create_descriptor_pool(&descriptor_pool_create_info, None)
+            {
+                Ok(p) => p,
+                Err(e) => {
+                    log::error!("Failed to create descriptor pool! Error: {}", e);
+                    return GPUTaskInProcess {
+                        errno: Some(GPUTaskRecordingError::DescriptorSetAllocationFailure),
+                        task: None,
+                    };
+                }
+            }
+        };
+
         let descriptor_set_alloc_info = DescriptorSetAllocateInfo {
             s_type: StructureType::DESCRIPTOR_SET_ALLOCATE_INFO,
             p_next: ptr::null(),
-            descriptor_pool: pipeline.descriptor_pool,
+            descriptor_pool,
             descriptor_set_count: 1,
             p_set_layouts: &pipeline.descriptor_set_layout,
         };
@@ -190,15 +221,14 @@ impl ComputeManager {
                         .get(&binding.id)
                         .unwrap()
                         .gpu_buffer
-                        .buffer
-                        .clone(),
+                        .buffer,
                     offset: 0,
                     range: (binding.data().len() * 4) as u64,
                 });
                 descriptor_writes.push(WriteDescriptorSet {
                     s_type: StructureType::WRITE_DESCRIPTOR_SET,
                     p_next: ptr::null(),
-                    dst_set: descriptor_set[0].clone(),
+                    dst_set: descriptor_set[0],
                     dst_binding: i as u32,
                     dst_array_element: 0,
                     descriptor_count: 1,
@@ -232,7 +262,7 @@ impl ComputeManager {
 
         match command_buffer_util::begin_command_buffer_recording(
             &self.device_info.device,
-            command_buffer.clone(),
+            command_buffer,
             false,
         ) {
             Ok(_) => (),
@@ -247,15 +277,15 @@ impl ComputeManager {
 
         unsafe {
             self.device_info.device.cmd_bind_pipeline(
-                command_buffer.clone(),
+                command_buffer,
                 PipelineBindPoint::COMPUTE,
                 pipeline.pipeline,
             );
 
             self.device_info.device.cmd_bind_descriptor_sets(
-                command_buffer.clone(),
+                command_buffer,
                 PipelineBindPoint::COMPUTE,
-                pipeline.pipeline_layout.clone(),
+                pipeline.pipeline_layout,
                 0,
                 &[descriptor_set[0]],
                 &[],
@@ -268,9 +298,9 @@ impl ComputeManager {
                 device_info: self.device_info.clone(),
                 buffers: buffer_backing,
                 descriptor_set: descriptor_set[0],
-                parent_descriptor_pool: pipeline.descriptor_pool,
+                parent_descriptor_pool: descriptor_pool,
                 allocator: self.allocator.clone(),
-                parent: self.clone(),
+                _parent: self.clone(),
             }),
             errno: None,
         }
@@ -280,7 +310,7 @@ impl ComputeManager {
         let fence = match command_buffer_util::end_and_submit_command_buffer(
             &self.device_info.device,
             task.command_buffer,
-            self.device_info.compute_queue.clone(),
+            self.device_info.compute_queue,
         ) {
             Ok(f) => f,
             Err(e) => {
@@ -289,10 +319,10 @@ impl ComputeManager {
             }
         };
 
-        return Some(GPUSyncPrimitive {
+        Some(GPUSyncPrimitive {
             fence,
             parent: task,
-        });
+        })
     }
 
     pub fn await_task(&self, sync: &GPUSyncPrimitive, sync_tensors: Vec<&mut Tensor>) {
@@ -300,7 +330,7 @@ impl ComputeManager {
             let _ = self
                 .device_info
                 .device
-                .wait_for_fences(&[sync.fence.clone()], true, u64::MAX);
+                .wait_for_fences(&[sync.fence], true, u64::MAX);
 
             self.device_info.device.destroy_fence(sync.fence, None);
         }
@@ -333,7 +363,7 @@ impl ComputeManager {
     }
 }
 
-impl<'a> GPUTaskInProcess {
+impl GPUTaskInProcess {
     pub fn op_local_sync_device(self, tensors: Vec<&Tensor>) -> Self {
         if self.task.is_none() || self.errno.is_some() {
             return self;
@@ -358,7 +388,7 @@ impl<'a> GPUTaskInProcess {
                 .as_ptr()
                 .copy_from(
                     tensor.data().as_ptr() as *const c_void,
-                    tensor.data().len() * 4 as usize,
+                    tensor.data().len() * 4_usize,
                 );
 
             self.task
@@ -367,9 +397,9 @@ impl<'a> GPUTaskInProcess {
                 .device_info
                 .device
                 .cmd_copy_buffer(
-                    self.task.as_ref().unwrap().command_buffer.clone(),
-                    backing.staging_buffer.buffer.clone(),
-                    backing.gpu_buffer.buffer.clone(),
+                    self.task.as_ref().unwrap().command_buffer,
+                    backing.staging_buffer.buffer,
+                    backing.gpu_buffer.buffer,
                     &[BufferCopy {
                         src_offset: 0,
                         dst_offset: 0,
@@ -385,7 +415,7 @@ impl<'a> GPUTaskInProcess {
                 .device_info
                 .device
                 .cmd_pipeline_barrier(
-                    self.task.as_ref().unwrap().command_buffer.clone(),
+                    self.task.as_ref().unwrap().command_buffer,
                     PipelineStageFlags::TRANSFER,
                     PipelineStageFlags::COMPUTE_SHADER,
                     DependencyFlags::empty(),
@@ -410,7 +440,7 @@ impl<'a> GPUTaskInProcess {
 
         unsafe {
             self.task.as_ref().unwrap().device_info.device.cmd_dispatch(
-                self.task.as_ref().unwrap().command_buffer.clone(),
+                self.task.as_ref().unwrap().command_buffer,
                 work_group.x,
                 work_group.y,
                 work_group.z,
@@ -432,7 +462,7 @@ impl<'a> GPUTaskInProcess {
                 .device_info
                 .device
                 .cmd_pipeline_barrier(
-                    self.task.as_ref().unwrap().command_buffer.clone(),
+                    self.task.as_ref().unwrap().command_buffer,
                     PipelineStageFlags::COMPUTE_SHADER,
                     PipelineStageFlags::TRANSFER,
                     DependencyFlags::empty(),
@@ -469,9 +499,9 @@ impl<'a> GPUTaskInProcess {
                 .device_info
                 .device
                 .cmd_copy_buffer(
-                    self.task.as_ref().unwrap().command_buffer.clone(),
-                    backing.gpu_buffer.buffer.clone(),
-                    backing.readback_buffer.as_ref().unwrap().buffer.clone(),
+                    self.task.as_ref().unwrap().command_buffer,
+                    backing.gpu_buffer.buffer,
+                    backing.readback_buffer.as_ref().unwrap().buffer,
                     &[BufferCopy {
                         src_offset: 0,
                         dst_offset: 0,
@@ -485,7 +515,7 @@ impl<'a> GPUTaskInProcess {
 
     pub fn finalize(self) -> Result<GPUTask, GPUTaskRecordingError> {
         if self.errno.is_some() {
-            return Err(self.errno.unwrap());
+            Err(self.errno.unwrap())
         } else if self.task.is_some() {
             return Ok(self.task.unwrap());
         } else {
@@ -495,13 +525,16 @@ impl<'a> GPUTaskInProcess {
     }
 }
 
-impl<'a> Drop for GPUTask {
+impl Drop for GPUTask {
     fn drop(&mut self) {
         unsafe {
             self.device_info.device.free_command_buffers(
-                self.device_info.compute_pool.clone(),
-                &[self.command_buffer.clone()],
+                self.device_info.compute_pool,
+                &[self.command_buffer],
             );
+
+            let _ = self.device_info.device.reset_descriptor_pool(self.parent_descriptor_pool, DescriptorPoolResetFlags::empty());
+            self.device_info.device.destroy_descriptor_pool(self.parent_descriptor_pool, None);
 
             // Free backing buffers
             self.buffers.iter_mut().for_each(|(_, buffer)| {
@@ -531,11 +564,6 @@ impl<'a> Drop for GPUTask {
                     log::error!("Failed to acquire allocator for GPU task!");
                 }
             });
-
-            let _ = self
-                .device_info
-                .device
-                .free_descriptor_sets(self.parent_descriptor_pool, &[self.descriptor_set]);
         }
     }
 }
