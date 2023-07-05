@@ -9,8 +9,7 @@ use ash::{
     vk::{
         self, ApplicationInfo, DebugUtilsMessageSeverityFlagsEXT, DebugUtilsMessageTypeFlagsEXT,
         DebugUtilsMessengerCreateInfoEXT, DebugUtilsMessengerEXT, InstanceCreateFlags,
-        InstanceCreateInfo,
-        StructureType,
+        InstanceCreateInfo, StructureType,
     },
     Entry, Instance,
 };
@@ -122,8 +121,8 @@ pub fn create_instance(
         let mut extension_names = Vec::new();
         #[cfg(any(target_os = "macos"))]
         {
-            extension_names.push(KhrPortabilityEnumerationFn::name());
-            extension_names.push(KhrGetPhysicalDeviceProperties2Fn::name());
+            extension_names.push(vk::KhrPortabilityEnumerationFn::name());
+            extension_names.push(vk::KhrGetPhysicalDeviceProperties2Fn::name());
         }
 
         if enable_validation {
